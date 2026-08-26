@@ -344,7 +344,7 @@ defineExpose({ pickProject })
               class="group flex h-8 items-center rounded-[var(--radius-sm)] px-1 text-[12.5px]"
               :class="
                 sessions.currentProjectKey === project.projectKey
-                  ? 'bg-[var(--accent-tint)] text-[var(--text-primary)]'
+                  ? 'text-[var(--accent)]'
                   : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
               "
               :data-project-key="project.projectKey"
@@ -410,7 +410,7 @@ defineExpose({ pickProject })
                 class="group/session relative flex h-7 w-full items-center gap-1.5 rounded-[var(--radius-sm)] px-2 text-left transition-[color,background-color,box-shadow] active:bg-[var(--accent-tint-strong)]"
                 :class="
                   sessions.currentId === session.id
-                    ? 'font-medium text-[var(--accent)]'
+                    ? 'bg-[var(--accent-tint)] text-[var(--text-primary)]'
                     : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                 "
                 :aria-current="sessions.currentId === session.id ? 'page' : undefined"
@@ -418,11 +418,6 @@ defineExpose({ pickProject })
                 @click="openSession(session)"
                 @contextmenu="onContextMenu(session, $event)"
               >
-                <span
-                  v-if="sessions.currentId === session.id"
-                  class="absolute left-0.5 size-1 rounded-full bg-[var(--accent)]"
-                  aria-hidden="true"
-                />
                 <GitBranch
                   v-if="session.worktreeBranch"
                   class="size-3 shrink-0 text-[var(--text-tertiary)]"

@@ -46,12 +46,14 @@ async function close() {
     <div class="pointer-events-none absolute inset-x-0 flex justify-center">
       <button
         type="button"
-        class="pointer-events-auto no-drag flex flex-col items-center justify-center gap-1 rounded-[var(--radius-sm)] px-1.5 py-0.5 transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+        class="pointer-events-auto no-drag flex flex-row items-center gap-1.5 rounded-[var(--radius-sm)] px-1.5 py-0.5 transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
         :title="`Pi-Harness v${APP_VERSION}`"
         @click="router.push('/')"
       >
         <img :src="appIconUrl" alt="" class="size-[18px] rounded-[4px]" />
-        <span class="text-[11px] font-medium leading-none tracking-tight text-[var(--text-secondary)]">
+        <span
+          class="text-[11px] font-medium leading-none tracking-tight text-[var(--text-secondary)]"
+        >
           Pi-Harness
         </span>
       </button>

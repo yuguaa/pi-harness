@@ -92,10 +92,6 @@ function isActive(path: string): boolean {
             : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
         "
       >
-        <span
-          v-if="isActive(item.to)"
-          class="absolute left-0 top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-r-full bg-[var(--accent)]"
-        />
         <component
           :is="item.icon"
           class="size-4 shrink-0"

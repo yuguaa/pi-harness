@@ -49,6 +49,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const filesLoading = ref(false)
   const gitLoading = ref(false)
   const sidebarWidth = ref(260)
+  const inspectorTab = ref<'files' | 'git' | 'diff'>('files')
+  const inspectorDiffPath = ref<string | null>(null)
   const pickedCwd = ref<string | null>(null)
   const projectRoots = ref<string[]>([])
   const pinnedProjectKeys = ref<string[]>([])
@@ -195,14 +197,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const id = `file:${filePath}`
     if (!tabs.value.some((t) => t.id === id)) {
       tabs.value = [...tabs.value, { id, kind: 'file', title, filePath, closable: true }]
-    }
-    activeTabId.value = id
-  }
-
-  function openDiffTab(filePath: string, title: string) {
-    const id = `diff:${filePath}`
-    if (!tabs.value.some((t) => t.id === id)) {
-      tabs.value = [...tabs.value, { id, kind: 'diff', title, filePath, closable: true }]
     }
     activeTabId.value = id
   }
@@ -569,6 +563,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     contentRevision.value += 1
   }
 
+  function showInspectorDiff(filePath: string): void {
+    inspectorDiffPath.value = filePath
+    inspectorTab.value = 'diff'
+  }
+
   function clearDraft(sessionId: string) {
     const next = { ...drafts.value }
     delete next[sessionId]
@@ -594,6 +593,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     filesLoading,
     gitLoading,
     sidebarWidth,
+    inspectorTab,
+    inspectorDiffPath,
     currentCwd,
     canChat,
     pickedCwd,
@@ -618,7 +619,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     restore,
     ensureChatTab,
     openFileTab,
-    openDiffTab,
     closeTab,
     closeOtherTabs,
     closeTabsToRight,
@@ -628,6 +628,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loadFiles,
     loadGit,
     refreshContent,
+    showInspectorDiff,
     addDraftImages,
     removeDraftImage,
     clearDraft,

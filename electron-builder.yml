@@ -1,6 +1,6 @@
 appId: dev.pi-harness.app
 productName: Pi-Harness
-copyright: Copyright © 2026 wangmiao
+copyright: Copyright © 2026 wangmiao, yuguaa
 directories:
   output: release
   buildResources: build
@@ -54,9 +54,9 @@ linux:
         - x64
   category: Development
   icon: build/icon.png
-  maintainer: wangmiao <tuziling84@gmail.com>
+  maintainer: yuguaa <280722781@qq.com>
 publish:
   - provider: github
-    owner: wangmiaozero
+    owner: yuguaa
     repo: pi-harness
     releaseType: release

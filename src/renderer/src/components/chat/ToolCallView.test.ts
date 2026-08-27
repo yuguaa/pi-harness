@@ -1,10 +1,11 @@
 import { mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { describe, expect, it } from 'vitest'
 import ToolCallView from './ToolCallView.vue'
 import type { ToolCallContent } from '@shared/types/workspace'
 
 describe('ToolCallView', () => {
-  it('expands tool details by default and allows collapsing them', async () => {
+  it('collapses tool details by default and allows expanding them', async () => {
     const block: ToolCallContent = {
       type: 'toolCall',
       toolCallId: 'tool-1',
@@ -13,12 +14,12 @@ describe('ToolCallView', () => {
     }
     const wrapper = mount(ToolCallView, {
       props: { block },
-      global: { mocks: { $t: (key: string) => key } }
+      global: { plugins: [createPinia()], mocks: { $t: (key: string) => key } }
     })
 
-    expect(wrapper.get('pre').isVisible()).toBe(true)
+    expect(wrapper.find('pre').exists()).toBe(false)
 
     await wrapper.get('button').trigger('click')
-    expect(wrapper.find('pre').exists()).toBe(false)
+    expect(wrapper.get('pre').isVisible()).toBe(true)
   })
 })

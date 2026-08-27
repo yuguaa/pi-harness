@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsNav from '@renderer/components/layout/SettingsNav.vue'
 import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -384,6 +385,7 @@ onBeforeUnmount(stopUpdateListener)
         {{ $t('common.save') }}
       </Button>
     </header>
+    <SettingsNav />
 
     <div class="flex-1 overflow-y-auto">
       <div class="mx-auto max-w-[720px] px-6 py-5 space-y-5">

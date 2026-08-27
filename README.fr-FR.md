@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-1.1.0-4C8DFF?style=flat-square" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.0.1-4C8DFF?style=flat-square" />
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0--only-663399?style=flat-square" />
   <img alt="platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-6B7280?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D22-43853D?style=flat-square" />
@@ -132,10 +132,10 @@ Le domaine reste découplé du JSON natif Pi via un Adapter. Les champs inconnus
 
 ## Auteur
 
-[wangmiao](https://github.com/wangmiaozero) · [tuziling84@gmail.com](mailto:tuziling84@gmail.com) · [github.com/wangmiaozero/pi-harness](https://github.com/wangmiaozero/pi-harness)
+[yuguaa](https://github.com/yuguaa) · [280722781@qq.com](mailto:280722781@qq.com) · [github.com/yuguaa/pi-harness](https://github.com/yuguaa/pi-harness)
 
 ## Licence
 
 Pi-Harness est un logiciel libre sous [GNU Affero General Public License v3.0 only](./LICENSE) (`AGPL-3.0-only`). Son utilisation, sa modification et sa redistribution sont autorisées selon les conditions de la licence. Toute version modifiée mise à disposition via un réseau doit proposer à ses utilisateurs le code source correspondant, conformément à l’AGPL v3.
 
-Copyright © 2026 [wangmiao](https://github.com/wangmiaozero).
+Copyright © 2026 [wangmiao](https://github.com/wangmiaozero), [yuguaa](https://github.com/yuguaa).

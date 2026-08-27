@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, shallowRef } from 'vue'
+import { reactive, ref, shallowRef } from 'vue'
 import type {
   AgentEvent,
   AgentImageAttachment,
@@ -25,6 +25,23 @@ import {
   type ToolPreset
 } from '@shared/workspace/tool-presets'
 import { useSessionStore } from './sessions'
+import { useConversationChangesStore } from './conversation-changes'
+
+interface ToolExecution {
+  toolName: string
+  running: boolean
+  result?: string
+  isError?: boolean
+}
+
+interface QueuedMessage {
+  id: string
+  sessionId: string | null
+  cwd: string | null
+  message: string
+  images: AgentImageAttachment[]
+  preset: ToolPreset
+}
 
 export const useAgentStore = defineStore('agent', () => {
   const messages = shallowRef<AgentMessage[]>([])
@@ -34,6 +51,10 @@ export const useAgentStore = defineStore('agent', () => {
   const state = shallowRef<AgentStateSnapshot | null>(null)
   const runningIds = ref<string[]>([])
   const tools = shallowRef<ToolEntry[]>([])
+  /** 工具执行实时状态，按 toolCallId 关联到对话区的工具卡片。 */
+  const toolExecutions = reactive(new Map<string, ToolExecution>())
+  /** 等待执行的本地消息队列（Agent 忙时入队）。 */
+  const pendingQueue = ref<QueuedMessage[]>([])
   const thinkingLevel = ref('auto')
   const toolPreset = ref<ToolPreset>('default')
   const sessionStats = shallowRef<SessionStats | null>(null)
@@ -44,10 +65,7 @@ export const useAgentStore = defineStore('agent', () => {
   let loadedStatsOverride: Partial<SessionStats> | null = null
   let loadedSessionId: string | null = null
   let loadGeneration = 0
-  const composerSelections = new Map<
-    string,
-    { thinkingLevel: string; toolPreset: ToolPreset }
-  >()
+  const composerSelections = new Map<string, { thinkingLevel: string; toolPreset: ToolPreset }>()
   const transientSessionIds = new Set<string>()
   let unsubEvent: (() => void) | null = null
   let unsubRunning: (() => void) | null = null
@@ -60,7 +78,11 @@ export const useAgentStore = defineStore('agent', () => {
       if (!body.sessionId || !body.event) return
       if (body.event.type === 'agent_end') void syncPersistedSession(body.sessionId)
       if (body.sessionId !== loadedSessionId) return
-      if (body.event.type === 'prompt_done') completionCount.value += 1
+      if (body.event.type === 'prompt_done') {
+        completionCount.value += 1
+        void useConversationChangesStore().finishConversation(body.sessionId, false)
+        void drainQueue(body.sessionId)
+      }
       applyEvent(body.event)
     })
     unsubRunning = getApi().on('agent-running', (payload) => {
@@ -90,6 +112,40 @@ export const useAgentStore = defineStore('agent', () => {
         if (delta) streaming.value = streamReducer(streaming.value, { type: 'delta', event: delta })
         break
       }
+      case 'tool_execution_start': {
+        const id = String(event.toolCallId ?? '')
+        if (id) {
+          toolExecutions.set(id, { toolName: String(event.toolName ?? ''), running: true })
+        }
+        break
+      }
+      case 'tool_execution_update': {
+        const id = String(event.toolCallId ?? '')
+        const current = toolExecutions.get(id)
+        if (current) {
+          const partial = event.partialResult
+          current.result =
+            typeof partial === 'string'
+              ? partial
+              : partial == null
+                ? current.result
+                : JSON.stringify(partial)
+        }
+        break
+      }
+      case 'tool_execution_end': {
+        const id = String(event.toolCallId ?? '')
+        const current = toolExecutions.get(id)
+        if (current) {
+          current.running = false
+          current.isError = event.isError === true
+          if (event.result != null) {
+            current.result =
+              typeof event.result === 'string' ? event.result : JSON.stringify(event.result)
+          }
+        }
+        break
+      }
       case 'message_end': {
         const completed = event.message as AgentMessage | undefined
         if (completed && completed.role !== 'user') {
@@ -108,6 +164,7 @@ export const useAgentStore = defineStore('agent', () => {
       case 'prompt_error':
         error.value = String(event.errorMessage ?? 'Agent error')
         streaming.value = streamReducer(streaming.value, { type: 'end' })
+        void useConversationChangesStore().finishConversation(loadedSessionId, true)
         break
       case 'compaction_start':
       case 'auto_compaction_start':
@@ -127,6 +184,7 @@ export const useAgentStore = defineStore('agent', () => {
     loadedSessionId = sessionId
     error.value = null
     streaming.value = INITIAL_STREAMING_STATE
+    toolExecutions.clear()
     if (!sessionId) {
       messages.value = []
       entryIds.value = []
@@ -217,6 +275,10 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  function isBusy(): boolean {
+    return sending.value || streaming.value.isStreaming || state.value?.isPromptRunning === true
+  }
+
   async function send(
     sessionId: string | null,
     cwd: string | null,
@@ -225,7 +287,6 @@ export const useAgentStore = defineStore('agent', () => {
     images: AgentImageAttachment[] = []
   ) {
     if (!message.trim() && !images.length) return
-    sending.value = true
     error.value = null
     const imageBlocks: ImageContent[] = images.map((image) => ({
       type: 'image',
@@ -238,6 +299,28 @@ export const useAgentStore = defineStore('agent', () => {
       timestamp: Date.now()
     }
     messages.value = [...messages.value, optimistic]
+
+    /* Agent 忙时入队，不立即发送；空闲时直接派发。 */
+    if (isBusy()) {
+      pendingQueue.value = [
+        ...pendingQueue.value,
+        { id: crypto.randomUUID(), sessionId, cwd, message, images, preset }
+      ]
+      return sessionId
+    }
+
+    return dispatch(sessionId, cwd, message, preset, images)
+  }
+
+  async function dispatch(
+    sessionId: string | null,
+    cwd: string | null,
+    message: string,
+    preset: ToolPreset,
+    images: AgentImageAttachment[]
+  ): Promise<string | null> {
+    sending.value = true
+    error.value = null
     let createdSessionId: string | null = null
     try {
       if (!sessionId) {
@@ -262,6 +345,7 @@ export const useAgentStore = defineStore('agent', () => {
           started.cwd,
           message.trim() || '[image]'
         )
+        void useConversationChangesStore().beginConversation(started.sessionId, started.cwd)
         await callApi(() =>
           getApi().agent.prompt({
             sessionId: started.sessionId,
@@ -271,28 +355,17 @@ export const useAgentStore = defineStore('agent', () => {
         )
         return started.sessionId
       }
-      const snap = await callApi(() => getApi().agent.state(sessionId))
-      if (snap?.isStreaming || snap?.isPromptRunning) {
-        await callApi(() =>
-          getApi().agent.prompt({
-            sessionId,
-            message,
-            streamingBehavior: 'followUp',
-            ...(images.length ? { images } : {})
-          })
-        )
-      } else {
-        await callApi(() =>
-          getApi().agent.start({
-            sessionId,
-            toolNames: getToolNamesForPreset(toolPreset.value),
-            ...(thinkingLevel.value !== 'auto' ? { thinkingLevel: thinkingLevel.value } : {})
-          })
-        )
-        await callApi(() =>
-          getApi().agent.prompt({ sessionId, message, ...(images.length ? { images } : {}) })
-        )
-      }
+      void useConversationChangesStore().beginConversation(sessionId, cwd)
+      await callApi(() =>
+        getApi().agent.start({
+          sessionId,
+          toolNames: getToolNamesForPreset(toolPreset.value),
+          ...(thinkingLevel.value !== 'auto' ? { thinkingLevel: thinkingLevel.value } : {})
+        })
+      )
+      await callApi(() =>
+        getApi().agent.prompt({ sessionId, message, ...(images.length ? { images } : {}) })
+      )
       return sessionId
     } catch (e) {
       error.value = (e as { message?: string }).message ?? String(e)
@@ -306,6 +379,36 @@ export const useAgentStore = defineStore('agent', () => {
     } finally {
       sending.value = false
     }
+  }
+
+  async function drainQueue(sessionId: string): Promise<void> {
+    const next = pendingQueue.value[0]
+    if (!next) return
+    pendingQueue.value = pendingQueue.value.slice(1)
+    const targetId = next.sessionId ?? sessionId
+    if (!targetId) return
+    await dispatch(targetId, next.cwd, next.message, next.preset, next.images)
+  }
+
+  async function steerQueued(queueId: string): Promise<void> {
+    const index = pendingQueue.value.findIndex((item) => item.id === queueId)
+    if (index === -1) return
+    const item = pendingQueue.value[index]
+    pendingQueue.value = pendingQueue.value.filter((entry) => entry.id !== queueId)
+    const targetId = item.sessionId ?? loadedSessionId
+    if (!targetId) return
+    await callApi(() =>
+      getApi().agent.prompt({
+        sessionId: targetId,
+        message: item.message,
+        streamingBehavior: 'steer',
+        ...(item.images.length ? { images: item.images } : {})
+      })
+    )
+  }
+
+  function removeQueued(queueId: string): void {
+    pendingQueue.value = pendingQueue.value.filter((entry) => entry.id !== queueId)
   }
 
   async function abort(sessionId: string) {
@@ -342,9 +445,7 @@ export const useAgentStore = defineStore('agent', () => {
     rememberComposerSelection(sessionId)
     if (level === 'auto') return
     try {
-      await callApi(() =>
-        getApi().agent.command(sessionId, { type: 'set_thinking_level', level })
-      )
+      await callApi(() => getApi().agent.command(sessionId, { type: 'set_thinking_level', level }))
     } catch (cause) {
       composerSelections.set(sessionId, previous)
       if (loadedSessionId === sessionId) applyComposerSelection(previous)
@@ -402,10 +503,7 @@ export const useAgentStore = defineStore('agent', () => {
     })
   }
 
-  function applyComposerSelection(selection: {
-    thinkingLevel: string
-    toolPreset: ToolPreset
-  }) {
+  function applyComposerSelection(selection: { thinkingLevel: string; toolPreset: ToolPreset }) {
     thinkingLevel.value = selection.thinkingLevel
     toolPreset.value = selection.toolPreset
   }
@@ -435,16 +533,20 @@ export const useAgentStore = defineStore('agent', () => {
     state,
     runningIds,
     tools,
+    toolExecutions,
     thinkingLevel,
     toolPreset,
     sessionStats,
     completionCount,
     error,
     sending,
+    pendingQueue,
     setupListeners,
     load,
     reconcile,
     send,
+    steerQueued,
+    removeQueued,
     abort,
     compact,
     setThinking,

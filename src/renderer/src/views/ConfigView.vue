@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsNav from '@renderer/components/layout/SettingsNav.vue'
 import { onMounted, onBeforeUnmount, ref, watch, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EditorView, basicSetup } from 'codemirror'
@@ -202,6 +203,7 @@ onBeforeUnmount(() => {
         </Button>
       </div>
     </header>
+    <SettingsNav />
 
     <!-- File selector strip — a tab-like control, not Tabs components, just two
          underlined buttons. -->

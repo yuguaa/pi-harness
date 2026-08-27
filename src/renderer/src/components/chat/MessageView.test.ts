@@ -84,7 +84,7 @@ describe('MessageView', () => {
     expect((details.element as HTMLDetailsElement).open).toBe(false)
   })
 
-  it('expands assistant thinking by default and allows collapsing it', async () => {
+  it('collapses assistant thinking by default and allows expanding it', async () => {
     const message: AssistantMessage = {
       role: 'assistant',
       model: 'test-model',
@@ -105,10 +105,10 @@ describe('MessageView', () => {
     })
 
     const details = wrapper.get('[data-testid="thinking-details"]')
-    expect(details.attributes('open')).toBe('')
-    expect(details.text()).toContain('分析问题')
+    expect((details.element as HTMLDetailsElement).open).toBe(false)
 
     await details.get('summary').trigger('click')
-    expect((details.element as HTMLDetailsElement).open).toBe(false)
+    expect((details.element as HTMLDetailsElement).open).toBe(true)
+    expect(details.text()).toContain('分析问题')
   })
 })

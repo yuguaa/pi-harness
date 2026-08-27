@@ -147,10 +147,12 @@ export const IPC_INVOKE = {
   filesList: invoke('files:list'),
   filesRead: invoke('files:read'),
   filesWrite: invoke('files:write'),
+  filesDelete: invoke('files:delete'),
   filesUpload: invoke('files:upload'),
 
   gitStatus: invoke('git:status'),
   gitDiff: invoke('git:diff'),
+  gitShowFile: invoke('git:show-file'),
 
   worktreeList: invoke('worktree:list'),
   worktreeCreate: invoke('worktree:create'),

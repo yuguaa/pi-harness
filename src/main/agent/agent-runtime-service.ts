@@ -157,7 +157,8 @@ export class AgentSessionWrapper {
             () => {
               acceptPreflight()
               finishPrompt()
-              if (!streamingBehavior) this.emit({ type: 'prompt_done' })
+              /* steer 只是调整方向，不视为完整一问一答；其余（含 followUp）都要追踪变更。 */
+              if (streamingBehavior !== 'steer') this.emit({ type: 'prompt_done' })
             },
             (error) => {
               rejectPreflight(error)
@@ -167,7 +168,7 @@ export class AgentSessionWrapper {
                   type: 'prompt_error',
                   errorMessage: error instanceof Error ? error.message : String(error)
                 })
-                if (!streamingBehavior) this.emit({ type: 'prompt_done' })
+                if (streamingBehavior !== 'steer') this.emit({ type: 'prompt_done' })
               }
             }
           )

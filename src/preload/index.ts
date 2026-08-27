@@ -184,12 +184,14 @@ const api: PiSwitchAPI = {
     read: (path) => invoke(IPC_INVOKE.filesRead, path),
     write: (path, text, expectedRevision, overwrite) =>
       invoke(IPC_INVOKE.filesWrite, { path, text, expectedRevision, overwrite }),
+    delete: (path) => invoke(IPC_INVOKE.filesDelete, { path }),
     upload: (directory, fileName, dataBase64, overwrite) =>
       invoke(IPC_INVOKE.filesUpload, { directory, fileName, dataBase64, overwrite })
   },
   git: {
     status: (cwd) => invoke(IPC_INVOKE.gitStatus, cwd),
-    diff: (cwd, filePath) => invoke(IPC_INVOKE.gitDiff, { cwd, filePath })
+    diff: (cwd, filePath) => invoke(IPC_INVOKE.gitDiff, { cwd, filePath }),
+    showFile: (cwd, filePath) => invoke(IPC_INVOKE.gitShowFile, { cwd, filePath })
   },
   worktrees: {
     list: (cwd) => invoke(IPC_INVOKE.worktreeList, cwd),

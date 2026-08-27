@@ -725,6 +725,7 @@ export interface PiSwitchAPI {
       expectedRevision: string,
       overwrite?: boolean
     ): Promise<FileWriteResult>
+    delete(path: string): Promise<void>
     upload(
       directory: string,
       fileName: string,
@@ -735,6 +736,7 @@ export interface PiSwitchAPI {
   git: {
     status(cwd: string): Promise<GitStatusResponse>
     diff(cwd: string, filePath: string): Promise<GitFileDiffResponse>
+    showFile(cwd: string, filePath: string): Promise<{ content: string | null }>
   }
   worktrees: {
     list(cwd: string): Promise<WorktreeInfo[]>

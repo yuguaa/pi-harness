@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsNav from '@renderer/components/layout/SettingsNav.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -430,6 +431,7 @@ onMounted(() => {
         </Button>
       </div>
     </header>
+    <SettingsNav />
 
     <div class="flex-1 overflow-y-auto px-5 pt-4 pb-6 space-y-4">
       <!-- Active Model summary — single line, not a Card. -->

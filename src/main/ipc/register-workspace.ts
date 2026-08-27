@@ -3,11 +3,13 @@ import { IPC_INVOKE } from '@shared/ipc/channels'
 import {
   allowRootSchema,
   agentCommandSchema,
+  fileDeleteSchema,
   fileListSchema,
   fileReadSchema,
   fileWriteSchema,
   fileUploadSchema,
   gitDiffSchema,
+  gitShowFileSchema,
   gitStatusSchema,
   promptAgentSchema,
   projectContextMenuSchema,
@@ -228,6 +230,14 @@ export function registerWorkspaceIpc(
       )
     })
   )
+  ipcMain.handle(IPC_INVOKE.filesDelete, (_e, input: unknown) =>
+    wrap(async () => {
+      const parsed = fileDeleteSchema.safeParse(typeof input === 'string' ? { path: input } : input)
+      if (!parsed.success)
+        throw new ValidationError('Invalid path', { issues: parsed.error.issues })
+      await files.delete(parsed.data.path)
+    })
+  )
   ipcMain.handle(IPC_INVOKE.filesUpload, (_e, input: unknown) =>
     wrap(async () => {
       const parsed = fileUploadSchema.safeParse(input)
@@ -255,6 +265,14 @@ export function registerWorkspaceIpc(
       if (!parsed.success)
         throw new ValidationError('Invalid diff query', { issues: parsed.error.issues })
       return git.diff(parsed.data.cwd, parsed.data.filePath)
+    })
+  )
+  ipcMain.handle(IPC_INVOKE.gitShowFile, (_e, input: unknown) =>
+    wrap(async () => {
+      const parsed = gitShowFileSchema.safeParse(input)
+      if (!parsed.success)
+        throw new ValidationError('Invalid show query', { issues: parsed.error.issues })
+      return git.showFile(parsed.data.cwd, parsed.data.filePath)
     })
   )
 

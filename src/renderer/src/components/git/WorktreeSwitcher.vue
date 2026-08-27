@@ -51,8 +51,7 @@ async function remove(path: string) {
 }
 
 function openDiff(filePath: string) {
-  const name = filePath.split(/[\\/]/).pop() ?? filePath
-  workspace.openDiffTab(filePath, `Diff: ${name}`)
+  workspace.showInspectorDiff(filePath)
 }
 
 onMounted(() => {
@@ -72,7 +71,11 @@ onMounted(() => {
       class="flex items-center justify-between rounded-[var(--radius-sm)] px-2 py-1 text-left text-[12px] hover:bg-[var(--bg-hover)]"
     >
       <span class="truncate">{{ wt.branch || wt.path }} {{ wt.isMain ? '(main)' : '' }}</span>
-      <span v-if="!wt.isMain" class="text-[11px] text-[var(--danger)]" @click.stop="remove(wt.path)">
+      <span
+        v-if="!wt.isMain"
+        class="text-[11px] text-[var(--danger)]"
+        @click.stop="remove(wt.path)"
+      >
         {{ $t('common.delete') }}
       </span>
     </button>

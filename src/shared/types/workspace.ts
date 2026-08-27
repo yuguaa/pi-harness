@@ -263,6 +263,34 @@ export interface GitFileDiffResponse {
   patch?: string
 }
 
+/** 一次对话（一问一答）对单个文件的变更记录。 */
+export interface ConversationFileChange {
+  filePath: string
+  status: GitFileStatusKind
+  additions: number
+  deletions: number
+  /** 对话前内容；null 表示文件在对话前不存在。 */
+  before: string | null
+  /** 对话后内容；null 表示文件在对话后已删除。 */
+  after: string | null
+  /** 当前是否已撤回。 */
+  reverted: boolean
+  /** 是否支持撤回/重做（文本文件且内容未截断）。 */
+  revertible: boolean
+}
+
+/** 一次对话的完整文件变更步骤。 */
+export interface ConversationChangeStep {
+  stepId: string
+  sessionId: string
+  files: ConversationFileChange[]
+  additions: number
+  deletions: number
+  createdAt: number
+  /** 该轮对话是否失败。 */
+  failed: boolean
+}
+
 export interface FileTreeEntry {
   name: string
   path: string

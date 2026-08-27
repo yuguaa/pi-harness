@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsNav from '@renderer/components/layout/SettingsNav.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -238,6 +239,7 @@ onMounted(() => {
         {{ $t('common.refresh') }}
       </Button>
     </header>
+    <SettingsNav />
 
     <div class="flex-1 overflow-y-auto">
       <div class="w-full px-5 py-5 space-y-5">

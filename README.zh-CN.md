@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-1.1.0-4C8DFF?style=flat-square" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.0.1-4C8DFF?style=flat-square" />
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0--only-663399?style=flat-square" />
   <img alt="platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-6B7280?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D22-43853D?style=flat-square" />
@@ -29,7 +29,7 @@ Pi-Harness 通过桌面界面管理 Pi 的 Provider、Model、凭证、Skills、
 
 密钥不出 Renderer 明文；macOS 写入系统钥匙串，Windows / Linux 走 Electron `safeStorage`。未知 Pi 字段原样保留。
 
-## v1.1.0 重点
+## v0.0.1 重点
 
 - 新增统一 Capability Layer，在领域层兼容 Skills、Extensions、Packages、MCP 与 Presets；Pi 仍是唯一 Agent Runtime。
 - Skills 页面新增紧凑的“精选技能”，Odai 作为普通 `skill` Capability 接入，用于 Agent 治理与任务验收。
@@ -139,10 +139,10 @@ Domain 与 Pi 原生 JSON 之间通过 Adapter 解耦，未知字段透传，不
 
 ## 作者
 
-[wangmiao](https://github.com/wangmiaozero) · [tuziling84@gmail.com](mailto:tuziling84@gmail.com) · [github.com/wangmiaozero/pi-harness](https://github.com/wangmiaozero/pi-harness)
+[yuguaa](https://github.com/yuguaa) · [280722781@qq.com](mailto:280722781@qq.com) · [github.com/yuguaa/pi-harness](https://github.com/yuguaa/pi-harness)
 
 ## 许可协议
 
 Pi-Harness 采用 [GNU Affero General Public License v3.0 only](./LICENSE)（`AGPL-3.0-only`）发布。你可以在该协议条款下使用、修改和再分发；通过网络向用户提供修改版时，必须按 AGPL v3 要求向这些用户提供对应源代码。
 
-Copyright © 2026 [wangmiao](https://github.com/wangmiaozero)。
+Copyright © 2026 [wangmiao](https://github.com/wangmiaozero), [yuguaa](https://github.com/yuguaa)。

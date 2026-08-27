@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsNav from '@renderer/components/layout/SettingsNav.vue'
 import { onMounted, ref, watch, nextTick } from 'vue'
 import { RefreshCw, Copy, Download, Activity, Wrench } from '@lucide/vue'
 import { toast } from 'vue-sonner'
@@ -166,6 +167,7 @@ watch(
         </Button>
       </div>
     </header>
+    <SettingsNav />
 
     <div class="flex-1 overflow-y-auto">
       <div

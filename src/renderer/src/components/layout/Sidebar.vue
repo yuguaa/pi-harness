@@ -2,16 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import {
-  LayoutDashboard,
-  Box,
-  Cpu,
-  Activity,
-  Settings,
-  Sparkles,
-  FileCode2,
-  SquareTerminal
-} from '@lucide/vue'
+import { SquareTerminal } from '@lucide/vue'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -23,49 +14,6 @@ const navItems = computed(() => [
     icon: SquareTerminal,
     label: t('nav.workspace'),
     short: t('navShort.workspace')
-  },
-  {
-    name: 'overview',
-    to: '/overview',
-    icon: LayoutDashboard,
-    label: t('nav.overview'),
-    short: t('navShort.overview')
-  },
-  {
-    name: 'providers',
-    to: '/providers',
-    icon: Box,
-    label: t('nav.providers'),
-    short: t('navShort.providers')
-  },
-  { name: 'models', to: '/models', icon: Cpu, label: t('nav.models'), short: t('navShort.models') },
-  {
-    name: 'skills',
-    to: '/skills',
-    icon: Sparkles,
-    label: t('nav.skills'),
-    short: t('navShort.skills')
-  },
-  {
-    name: 'config',
-    to: '/config',
-    icon: FileCode2,
-    label: t('nav.config'),
-    short: t('navShort.config')
-  },
-  {
-    name: 'diagnostics',
-    to: '/diagnostics',
-    icon: Activity,
-    label: t('nav.diagnostics'),
-    short: t('navShort.diagnostics')
-  },
-  {
-    name: 'settings',
-    to: '/settings',
-    icon: Settings,
-    label: t('nav.settings'),
-    short: t('navShort.settings')
   }
 ])
 

@@ -1,5 +1,5 @@
 import { constants as fsConstants } from 'node:fs'
-import { lstat, mkdir, open, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, open, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
 import path from 'node:path'
@@ -197,6 +197,16 @@ export class FileService {
     } finally {
       await handle.close()
     }
+  }
+
+  async delete(filePath: string): Promise<void> {
+    const realPath = await this.access.assertAllowed(filePath, { mustExist: true })
+    if ((await lstat(realPath)).isSymbolicLink()) {
+      throw new ValidationError('Refusing to delete a symbolic link', { filePath })
+    }
+    const st = await stat(realPath)
+    if (!st.isFile()) throw new FileSystemError('Delete target is not a file', { filePath })
+    await unlink(realPath)
   }
 
   async upload(

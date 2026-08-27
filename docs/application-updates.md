@@ -19,7 +19,7 @@ GitHub Release 必须同时包含 `electron-builder` 生成的更新元数据和
 - Windows：NSIS 安装包、blockmap 和 `latest.yml`。
 - Linux：AppImage、blockmap 和 `latest-linux.yml`。
 
-macOS 和 Windows 的正式发布产物应完成平台代码签名。更新器只消费 `electron-builder.yml` 中 `wangmiaozero/pi-harness` 的正式 Release，不在开发模式启用 `forceDevUpdateConfig`。
+macOS 和 Windows 的正式发布产物应完成平台代码签名。更新器只消费 `electron-builder.yml` 中 `yuguaa/pi-harness` 的正式 Release，不在开发模式启用 `forceDevUpdateConfig`。
 
 ## 本地验证
 

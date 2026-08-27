@@ -2,12 +2,30 @@ import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
 import { test, expect } from './fixtures'
+import type { Page } from '@playwright/test'
+
+/** 从工作区底部按钮进入设置域。 */
+async function openSettings(page: Page): Promise<void> {
+  await page
+    .getByTestId('workspace-sidebar')
+    .getByRole('button', { name: /^设置$|^Settings$/ })
+    .click()
+}
+
+/** 导航到设置域页面：链接在左侧 icon rail 被收敛后，需先进入设置页激活子导航。 */
+async function goTo(page: Page, hash: string): Promise<void> {
+  const link = page.locator(`a[href="${hash}"]`)
+  if (await link.count()) {
+    await link.first().click()
+    return
+  }
+  await openSettings(page)
+  await page.locator(`a[href="${hash}"]`).first().click()
+}
 
 test.describe('Pi-Harness smoke', () => {
   test('launches and shows workspace', async ({ page }) => {
     await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
-    // 默认直达工作区；菜单首项为工作区，概览入口现位于 #/overview
-    await expect(page.locator('a[href="#/workspace"]')).toBeVisible()
     await expect(page.getByTestId('workspace-project-required')).toBeVisible()
     await expect(page.getByTestId('page-mascot-background')).toHaveCount(0)
   })
@@ -21,7 +39,6 @@ test.describe('Pi-Harness smoke', () => {
       .poll(() => enabledButton.evaluate((element) => getComputedStyle(element).cursor))
       .toBe('pointer')
 
-    await page.locator('a[href="#/workspace"]').click()
     await expect
       .poll(() =>
         page
@@ -65,7 +82,7 @@ test.describe('Pi-Harness smoke', () => {
     await page.reload()
     await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
     await expect(page.getByTestId('page-mascot-background')).toHaveCount(0)
-    await expect(page.locator('main aside')).toBeVisible()
+    await expect(page.getByTestId('workspace-sidebar')).toBeVisible()
     await expect(page.getByTestId('workspace-project-required')).toBeVisible()
     await expect(page.getByTestId('workspace-new-session')).toBeDisabled()
     await expect(page.getByTestId('workspace-tabs')).toHaveCount(0)
@@ -85,7 +102,7 @@ test.describe('Pi-Harness smoke', () => {
     await workspaceSidebar.dispatchEvent('dragleave')
     await expect(page.getByTestId('project-drop-overlay')).toHaveCount(0)
 
-    await page.locator('a[href="#/providers"]').click()
+    await goTo(page, '#/providers')
     await expect(page.locator('h1').filter({ hasText: /提供商|Providers/ })).toBeVisible()
     await expect(page.getByTestId('page-mascot-background')).toHaveCount(0)
     const providerSwitches = page.locator('main [role="switch"]')
@@ -99,25 +116,25 @@ test.describe('Pi-Harness smoke', () => {
       )
       .toBe(1)
 
-    await page.locator('a[href="#/models"]').click()
+    await goTo(page, '#/models')
     await expect(page.locator('h1').filter({ hasText: /模型|Models/ })).toBeVisible()
     await expect(page.getByTestId('page-mascot-background')).toHaveCount(0)
 
-    await page.locator('a[href="#/settings"]').click()
+    await goTo(page, '#/settings')
     await expect(page.locator('h1').filter({ hasText: /设置|Settings/ })).toBeVisible()
     await expect(page.getByTestId('page-mascot-background')).toHaveCount(0)
 
-    await page.locator('a[href="#/config"]').click()
+    await goTo(page, '#/config')
     await expect(page.getByText(/models\.json/i).first()).toBeVisible()
     await expect(page.getByTestId('page-mascot-background')).toHaveCount(0)
 
-    await page.locator('a[href="#/skills"]').click()
+    await goTo(page, '#/skills')
     await expect(page.getByTestId('page-mascot-background')).toHaveCount(0)
 
-    await page.locator('a[href="#/diagnostics"]').click()
+    await goTo(page, '#/diagnostics')
     await expect(page.getByTestId('page-mascot-background')).toHaveCount(0)
 
-    await page.locator('a[href="#/overview"]').click()
+    await goTo(page, '#/overview')
     await expect(page.getByTestId('page-mascot-background')).toHaveCount(0)
 
     expect(pageErrors).toEqual([])
@@ -125,7 +142,7 @@ test.describe('Pi-Harness smoke', () => {
   })
 
   test('installs a featured skill through the trusted capability flow', async ({ page }) => {
-    await page.locator('a[href="#/skills"]').click()
+    await goTo(page, '#/skills')
     const card = page.getByTestId('featured-capability-odai')
     await expect(card).toBeVisible()
     await expect(card).toContainText('Odai')
@@ -166,7 +183,9 @@ test.describe('Pi-Harness smoke', () => {
       )
     }, fixtureRoot)
 
-    await page.locator('a[href="#/workspace"]').click()
+    /* 启动已在工作区，重载以读取刚设置的 workspace 快照。 */
+    await page.reload()
+    await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
     const projectTree = page.getByTestId('workspace-project-tree')
     await expect(projectTree.getByText('fixtures', { exact: true })).toBeVisible()
     await expect(
@@ -239,7 +258,7 @@ test.describe('Pi-Harness smoke', () => {
       element.querySelector('[data-scroll-test-filler]')?.remove()
     })
 
-    await page.getByRole('button', { name: /文件|Files/, exact: true }).click()
+    await page.getByRole('button', { name: /^文件$|^Files$/ }).click()
     await expect(aiMotion).toHaveClass(/opacity-0/)
     await page.getByRole('button', { name: 'code-preview.html', exact: true }).click()
 
@@ -281,7 +300,7 @@ test.describe('Pi-Harness smoke', () => {
       )
     }, fixtureRoot)
 
-    await page.locator('a[href="#/settings"]').click()
+    await openSettings(page)
     const bypass = await page.evaluate(() =>
       window.piSwitch.settings.set({
         mascotUnlocked: true,
@@ -360,8 +379,9 @@ test.describe('Pi-Harness smoke', () => {
         )
       }, tempRoot)
 
-      await page.locator('a[href="#/workspace"]').click()
-      await page.getByRole('button', { name: /文件|Files/, exact: true }).click()
+      await page.reload()
+      await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
+      await page.getByRole('button', { name: /^文件$|^Files$/ }).click()
       await expect(page.getByRole('button', { name: 'node_modules', exact: true })).toBeVisible()
       await expect(page.getByRole('button', { name: '.env', exact: true })).toBeVisible()
       await page.getByRole('button', { name: 'editable.ts', exact: true }).click()
@@ -439,8 +459,9 @@ test.describe('Pi-Harness smoke', () => {
         )
       }, fixtureRoot)
 
-      await page.locator('a[href="#/workspace"]').click()
-      await page.getByRole('button', { name: /文件|Files/, exact: true }).click()
+      await page.reload()
+      await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
+      await page.getByRole('button', { name: /^文件$|^Files$/ }).click()
       await expect(page.getByRole('button', { name: 'existing.txt', exact: true })).toBeVisible()
       const chooser = page.waitForEvent('filechooser')
       await page.getByRole('button', { name: /上传文件|Upload files/ }).click()
@@ -477,7 +498,7 @@ test.describe('Pi-Harness smoke', () => {
     })
     await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
 
-    await page.locator('a[href="#/providers"]').click()
+    await goTo(page, '#/providers')
     const presetPicker = page.getByPlaceholder(/搜索并选择厂商|Search and select a provider/)
     await presetPicker.fill('DeepSeek')
     await page
@@ -539,7 +560,7 @@ test.describe('Pi-Harness smoke', () => {
     })
 
     await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
-    await page.locator('a[href="#/models"]').click()
+    await goTo(page, '#/models')
     await page.getByRole('button', { name: /新建模型|New model/ }).click()
 
     const dialog = page.getByRole('dialog')
@@ -573,7 +594,7 @@ test.describe('Pi-Harness smoke', () => {
   test('shows local skills and the curated extension market', async ({ page }) => {
     await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
 
-    await page.locator('a[href="#/skills"]').click()
+    await goTo(page, '#/skills')
     await expect(page.locator('h1').filter({ hasText: /技能|Skills/ })).toBeVisible()
     await expect(page.locator('ul').getByText('demo-skill', { exact: true })).toBeVisible()
 
@@ -596,7 +617,7 @@ test.describe('Pi-Harness smoke', () => {
   })
 
   test('installs, uninstalls, and reinstalls a bundled Matt Pocock Skill', async ({ page }) => {
-    await page.locator('a[href="#/skills"]').click()
+    await goTo(page, '#/skills')
     await page.getByRole('button', { name: /市场|Market/ }).click()
 
     const collection = page.getByTestId('market-collection-builtin:mattpocock-skills')
@@ -637,7 +658,7 @@ test.describe('Pi-Harness smoke', () => {
   })
 
   test('uninstalls a user-authored standalone skill with a backup-first flow', async ({ page }) => {
-    await page.locator('a[href="#/skills"]').click()
+    await goTo(page, '#/skills')
     await page.locator('ul').getByText('demo-skill', { exact: true }).click()
     await page.getByLabel(/卸载技能|Uninstall skill/).click()
 
@@ -660,7 +681,7 @@ test.describe('Pi-Harness smoke', () => {
       })
     })
 
-    await page.locator('a[href="#/skills"]').click()
+    await goTo(page, '#/skills')
     await page.getByRole('button', { name: /扩展包|Packages/, exact: true }).click()
     const packageRow = page.getByRole('listitem').filter({ hasText: 'pi-e2e-missing' })
     await expect(packageRow).toBeVisible()
@@ -676,7 +697,7 @@ test.describe('Pi-Harness smoke', () => {
   test('saves the light theme without requiring Pi', async ({ page }) => {
     await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
 
-    await page.locator('a[href="#/settings"]').click()
+    await openSettings(page)
     await expect(page.locator('h1').filter({ hasText: /设置|Settings/ })).toBeVisible()
     /* ^主题$ 锚定避免误中“主题颜色”下拉。 */
     await page.getByRole('button', { name: /^主题$|^Theme$/ }).click()
@@ -688,7 +709,7 @@ test.describe('Pi-Harness smoke', () => {
 
   test('cleans backups according to the retention count after confirmation', async ({ page }) => {
     await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
-    await page.locator('a[href="#/settings"]').click()
+    await openSettings(page)
     await expect(page.locator('h1').filter({ hasText: /设置|Settings/ })).toBeVisible()
 
     const createBackup = page.getByRole('button', { name: /创建备份|Create backup/ })
@@ -720,7 +741,7 @@ test.describe('Pi-Harness smoke', () => {
     await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
 
     /* 启动已直达工作区，安装引导按钮在总览页。 */
-    await page.locator('a[href="#/overview"]').click()
+    await goTo(page, '#/overview')
     await page.getByRole('button', { name: /一键安装|安装 Pi|Install Pi/ }).click()
 
     await page.waitForTimeout(250)

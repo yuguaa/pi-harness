@@ -5,7 +5,6 @@ import { useSettingsStore } from '@renderer/stores/settings'
 import { normalizeMascotStyle } from '@shared/constants/mascot'
 import MascotBackground from './MascotBackground.vue'
 import { usePetStore } from '@renderer/stores/pet'
-import Sidebar from './Sidebar.vue'
 import TitleBar from './TitleBar.vue'
 
 const route = useRoute()
@@ -19,7 +18,6 @@ const mascotStyle = computed(() => normalizeMascotStyle(settings.settings?.masco
   <div class="flex h-full flex-col bg-[var(--bg-window)]">
     <TitleBar />
     <div class="flex min-h-0 flex-1">
-      <Sidebar />
       <div class="relative isolate min-h-0 flex-1 overflow-hidden bg-[var(--bg-workspace)]">
         <MascotBackground
           :style="mascotStyle"

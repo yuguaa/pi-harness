@@ -1,22 +1,22 @@
 {
   "name": "pi-harness",
-  "version": "1.1.0",
+  "version": "0.0.1",
   "description": "The Complete Desktop Harness for Pi Coding Agent",
   "productName": "Pi-Harness",
   "author": {
-    "name": "wangmiao",
-    "email": "tuziling84@gmail.com",
-    "url": "https://github.com/wangmiaozero"
+    "name": "yuguaa",
+    "email": "280722781@qq.com",
+    "url": "https://github.com/yuguaa"
   },
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wangmiaozero/pi-harness.git"
+    "url": "git+https://github.com/yuguaa/pi-harness.git"
   },
-  "homepage": "https://github.com/wangmiaozero/pi-harness",
+  "homepage": "https://github.com/yuguaa/pi-harness",
   "bugs": {
-    "url": "https://github.com/wangmiaozero/pi-harness/issues",
-    "email": "tuziling84@gmail.com"
+    "url": "https://github.com/yuguaa/pi-harness/issues",
+    "email": "280722781@qq.com"
   },
   "private": true,
   "main": "./out/main/index.js",

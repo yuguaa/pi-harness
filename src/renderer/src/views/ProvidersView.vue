@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsNav from '@renderer/components/layout/SettingsNav.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Plus, Pencil, Copy, Trash2, Zap, Box, Search, Circle } from '@lucide/vue'
@@ -559,6 +560,7 @@ onMounted(() => {
         </Button>
       </div>
     </header>
+    <SettingsNav />
 
     <!-- Searchable Pi-compatible provider/model presets. -->
     <div

@@ -107,10 +107,15 @@ const userImages = computed(() => {
 const toolResultText = computed(() => {
   const msg = props.message
   if (msg.role !== 'toolResult') return ''
-  return msg.content
+  const text = msg.content
     .filter((b) => b.type === 'text')
     .map((b) => (b.type === 'text' ? b.text : ''))
     .join('\n')
+  if (text) return text
+  /* 不少工具（如 edit/write）把结果放在 details 而非 content，这里回退展示。 */
+  const details = msg.details
+  if (details == null) return ''
+  return typeof details === 'string' ? details : JSON.stringify(details, null, 2)
 })
 
 const bashText = computed(() => {
@@ -121,13 +126,15 @@ const bashText = computed(() => {
 </script>
 
 <template>
-  <article class="mb-3">
+  <article
+    class="mb-3 flex flex-col"
+    :class="message.role === 'user' ? 'items-end' : 'items-start'"
+  >
     <p
-      v-if="message.role !== 'toolResult'"
+      v-if="message.role !== 'toolResult' && message.role !== 'user'"
       class="mb-1 text-[10.5px] font-medium uppercase tracking-[0.05em] text-[var(--text-tertiary)]"
     >
-      <template v-if="message.role === 'user'">{{ $t('workspace.roleUser') }}</template>
-      <template v-else-if="message.role === 'assistant'">
+      <template v-if="message.role === 'assistant'">
         {{ $t('workspace.roleAssistant') }}
         <span v-if="streaming"> · {{ $t('workspace.streaming') }}</span>
       </template>
@@ -137,7 +144,7 @@ const bashText = computed(() => {
 
     <div
       v-if="message.role === 'user'"
-      class="rounded-[var(--radius-sm)] bg-[var(--bg-surface)] px-3 py-2 text-[13px] text-[var(--text-primary)]"
+      class="max-w-[85%] rounded-[var(--radius-md)] rounded-tr-[var(--radius-xs)] bg-[var(--accent-tint)] px-3 py-2 text-[13px] text-[var(--text-primary)]"
     >
       <p v-if="userText" class="whitespace-pre-wrap">{{ userText }}</p>
       <div v-if="userImages.length" class="flex flex-wrap gap-2" :class="userText ? 'mt-2' : ''">
@@ -154,7 +161,7 @@ const bashText = computed(() => {
       </div>
     </div>
 
-    <div v-else-if="message.role === 'assistant'" class="space-y-2">
+    <div v-else-if="message.role === 'assistant'" class="w-full space-y-2">
       <template v-for="(block, i) in message.content" :key="i">
         <Suspense v-if="block.type === 'text'">
           <Markdown
@@ -172,7 +179,6 @@ const bashText = computed(() => {
         </Suspense>
         <details
           v-else-if="block.type === 'thinking'"
-          open
           data-testid="thinking-details"
           class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2 py-1"
         >
@@ -205,7 +211,7 @@ const bashText = computed(() => {
       v-else-if="message.role === 'toolResult'"
       open
       data-testid="tool-result-details"
-      class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+      class="w-full rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
     >
       <summary
         class="cursor-pointer px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.05em] text-[var(--text-tertiary)] select-none"
@@ -221,7 +227,7 @@ const bashText = computed(() => {
 
     <pre
       v-else-if="message.role === 'bashExecution'"
-      class="overflow-x-auto whitespace-pre-wrap rounded-[var(--radius-sm)] bg-[var(--bg-surface)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-secondary)]"
+      class="w-full overflow-x-auto whitespace-pre-wrap rounded-[var(--radius-sm)] bg-[var(--bg-surface)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-secondary)]"
       v-text="bashText"
     />
 

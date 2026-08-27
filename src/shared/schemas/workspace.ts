@@ -96,6 +96,10 @@ export const fileWriteSchema = z.object({
   overwrite: z.boolean().optional()
 })
 
+export const fileDeleteSchema = z.object({
+  path: workspacePathSchema
+})
+
 export const fileUploadSchema = z.object({
   directory: workspacePathSchema,
   fileName: z
@@ -120,6 +124,11 @@ export const gitStatusSchema = z.object({
 })
 
 export const gitDiffSchema = z.object({
+  cwd: cwdSchema,
+  filePath: workspacePathSchema
+})
+
+export const gitShowFileSchema = z.object({
   cwd: cwdSchema,
   filePath: workspacePathSchema
 })

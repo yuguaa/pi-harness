@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import {
   ChevronDown,
   ChevronRight,
@@ -9,13 +10,12 @@ import {
   GitBranch,
   Pin,
   Plus,
-  RefreshCw
+  RefreshCw,
+  Settings
 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import IconButton from '@renderer/components/ui/IconButton.vue'
 import EmptyState from '@renderer/components/ui/EmptyState.vue'
-import FileExplorer from '@renderer/components/files/FileExplorer.vue'
-import WorktreeSwitcher from '@renderer/components/git/WorktreeSwitcher.vue'
 import { useSessionStore } from '@renderer/stores/sessions'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { useAgentStore } from '@renderer/stores/agent'
@@ -26,10 +26,10 @@ import type { SessionInfo, SessionProjectGroup } from '@shared/types/workspace'
 
 const emit = defineEmits<{ 'focus-composer': [] }>()
 const { t, locale } = useI18n()
+const router = useRouter()
 const sessions = useSessionStore()
 const workspace = useWorkspaceStore()
 const agent = useAgentStore()
-const section = ref<'sessions' | 'files' | 'git'>('sessions')
 const collapsedProjectKeys = ref<string[]>([])
 const dragActive = ref(false)
 let dragDepth = 0
@@ -307,143 +307,130 @@ defineExpose({ pickProject })
       </div>
     </div>
 
-    <div class="flex gap-1 border-b border-[var(--border-subtle)] px-1 py-1">
-      <button
-        v-for="item in [
-          { id: 'sessions', label: $t('workspace.sessions') },
-          { id: 'files', label: $t('workspace.files') },
-          { id: 'git', label: $t('workspace.git') }
-        ]"
-        :key="item.id"
-        class="flex-1 rounded-[var(--radius-sm)] py-1 text-[11px]"
-        :class="
-          section === item.id
-            ? 'bg-[var(--accent-tint)] text-[var(--text-primary)]'
-            : 'text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]'
-        "
-        @click="section = item.id as 'sessions' | 'files' | 'git'"
-      >
-        {{ item.label }}
-      </button>
-    </div>
-
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <template v-if="section === 'sessions'">
-        <div class="px-2 py-2" data-testid="workspace-project-tree">
-          <p class="mb-1 text-[10.5px] uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
-            {{ $t('workspace.projects') }}
-          </p>
-          <EmptyState
-            v-if="!projects.length"
-            :title="$t('workspace.noProjects')"
-            :description="$t('workspace.dropProjectHint')"
-            :icon="FolderOpen"
-          />
-          <div v-for="project in projects" :key="project.projectKey" class="mb-1">
-            <div
-              class="group flex h-8 items-center rounded-[var(--radius-sm)] px-1 text-[12.5px]"
-              :class="
-                sessions.currentProjectKey === project.projectKey
-                  ? 'text-[var(--accent)]'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+      <div class="px-2 py-2" data-testid="workspace-project-tree">
+        <p class="mb-1 text-[10.5px] uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+          {{ $t('workspace.projects') }}
+        </p>
+        <EmptyState
+          v-if="!projects.length"
+          :title="$t('workspace.noProjects')"
+          :description="$t('workspace.dropProjectHint')"
+          :icon="FolderOpen"
+        />
+        <div v-for="project in projects" :key="project.projectKey" class="mb-1">
+          <div
+            class="group flex h-8 items-center rounded-[var(--radius-sm)] px-1 text-[12.5px]"
+            :class="
+              sessions.currentProjectKey === project.projectKey
+                ? 'text-[var(--accent)]'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+            "
+            :data-project-key="project.projectKey"
+            @contextmenu="onProjectContextMenu(project, $event)"
+          >
+            <button
+              type="button"
+              class="flex size-6 shrink-0 items-center justify-center rounded hover:bg-[var(--bg-hover)]"
+              :aria-label="
+                isCollapsed(project.projectKey)
+                  ? $t('workspace.expandProject')
+                  : $t('workspace.collapseProject')
               "
-              :data-project-key="project.projectKey"
-              @contextmenu="onProjectContextMenu(project, $event)"
+              @click.stop="toggleProject(project.projectKey)"
             >
-              <button
-                type="button"
-                class="flex size-6 shrink-0 items-center justify-center rounded hover:bg-[var(--bg-hover)]"
-                :aria-label="
-                  isCollapsed(project.projectKey)
-                    ? $t('workspace.expandProject')
-                    : $t('workspace.collapseProject')
-                "
-                @click.stop="toggleProject(project.projectKey)"
-              >
-                <ChevronRight
-                  v-if="isCollapsed(project.projectKey)"
-                  class="size-3"
-                  :stroke-width="1.75"
-                />
-                <ChevronDown v-else class="size-3" :stroke-width="1.75" />
-              </button>
-              <button
-                type="button"
-                class="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
-                :title="project.projectRoot"
-                @click="selectProject(project)"
-              >
-                <Folder class="size-4 shrink-0" :stroke-width="1.65" />
-                <span class="truncate font-medium">{{ project.name }}</span>
-                <Pin
-                  v-if="workspace.isProjectPinned(project.projectKey)"
-                  class="size-3 shrink-0 text-[var(--text-tertiary)]"
-                  :stroke-width="1.75"
-                  :aria-label="$t('workspace.pinned')"
-                />
-              </button>
-              <button
-                type="button"
-                class="flex size-6 shrink-0 items-center justify-center rounded border border-transparent text-[var(--text-tertiary)] opacity-60 transition-[color,background-color,border-color,opacity] hover:border-[var(--accent-border)] hover:bg-[var(--accent-tint-strong)] hover:text-[var(--accent)] hover:opacity-100 focus-visible:border-[var(--accent-border)] focus-visible:bg-[var(--accent-tint)] focus-visible:text-[var(--accent)] focus-visible:opacity-100 focus-visible:outline-none active:bg-[var(--bg-selected)]"
-                :aria-label="$t('workspace.newSessionForProject', { project: project.name })"
-                :title="$t('workspace.newSessionForProject', { project: project.name })"
-                @click.stop="newSessionForProject(project)"
-              >
-                <Plus class="size-3.5" :stroke-width="1.75" />
-              </button>
-            </div>
+              <ChevronRight
+                v-if="isCollapsed(project.projectKey)"
+                class="size-3"
+                :stroke-width="1.75"
+              />
+              <ChevronDown v-else class="size-3" :stroke-width="1.75" />
+            </button>
+            <button
+              type="button"
+              class="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
+              :title="project.projectRoot"
+              @click="selectProject(project)"
+            >
+              <Folder class="size-4 shrink-0" :stroke-width="1.65" />
+              <span class="truncate font-medium">{{ project.name }}</span>
+              <Pin
+                v-if="workspace.isProjectPinned(project.projectKey)"
+                class="size-3 shrink-0 text-[var(--text-tertiary)]"
+                :stroke-width="1.75"
+                :aria-label="$t('workspace.pinned')"
+              />
+            </button>
+            <button
+              type="button"
+              class="flex size-6 shrink-0 items-center justify-center rounded border border-transparent text-[var(--text-tertiary)] opacity-60 transition-[color,background-color,border-color,opacity] hover:border-[var(--accent-border)] hover:bg-[var(--accent-tint-strong)] hover:text-[var(--accent)] hover:opacity-100 focus-visible:border-[var(--accent-border)] focus-visible:bg-[var(--accent-tint)] focus-visible:text-[var(--accent)] focus-visible:opacity-100 focus-visible:outline-none active:bg-[var(--bg-selected)]"
+              :aria-label="$t('workspace.newSessionForProject', { project: project.name })"
+              :title="$t('workspace.newSessionForProject', { project: project.name })"
+              @click.stop="newSessionForProject(project)"
+            >
+              <Plus class="size-3.5" :stroke-width="1.75" />
+            </button>
+          </div>
 
-            <div
-              v-if="!isCollapsed(project.projectKey)"
-              class="ml-5 mt-0.5 border-l border-[var(--border-subtle)] pl-1"
+          <div
+            v-if="!isCollapsed(project.projectKey)"
+            class="ml-5 mt-0.5 border-l border-[var(--border-subtle)] pl-1"
+          >
+            <p
+              v-if="!project.sessions.length"
+              class="px-2 py-1 text-[10.5px] text-[var(--text-tertiary)]"
             >
-              <p
-                v-if="!project.sessions.length"
-                class="px-2 py-1 text-[10.5px] text-[var(--text-tertiary)]"
-              >
-                {{ $t('workspace.noSessions') }}
-              </p>
-              <button
-                v-for="session in project.sessions"
-                :key="session.id"
-                type="button"
-                class="group/session relative flex h-7 w-full items-center gap-1.5 rounded-[var(--radius-sm)] px-2 text-left transition-[color,background-color,box-shadow] active:bg-[var(--accent-tint-strong)]"
-                :class="
-                  sessions.currentId === session.id
-                    ? 'bg-[var(--accent-tint)] text-[var(--text-primary)]'
-                    : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-                "
-                :aria-current="sessions.currentId === session.id ? 'page' : undefined"
-                :title="session.name || session.firstMessage"
-                @click="openSession(session)"
-                @contextmenu="onContextMenu(session, $event)"
-              >
-                <GitBranch
-                  v-if="session.worktreeBranch"
-                  class="size-3 shrink-0 text-[var(--text-tertiary)]"
-                  :stroke-width="1.75"
-                />
-                <Pin
-                  v-if="workspace.isSessionPinned(session.id)"
-                  class="size-3 shrink-0 text-[var(--text-tertiary)]"
-                  :stroke-width="1.75"
-                  :aria-label="$t('workspace.pinned')"
-                />
-                <span class="min-w-0 flex-1 truncate text-[12px] text-current">
-                  {{ session.name || session.firstMessage || session.id }}
-                </span>
-                <span
-                  v-if="running(session.id)"
-                  class="size-1.5 shrink-0 rounded-full bg-[var(--success)]"
-                  :title="$t('workspace.running')"
-                />
-              </button>
-            </div>
+              {{ $t('workspace.noSessions') }}
+            </p>
+            <button
+              v-for="session in project.sessions"
+              :key="session.id"
+              type="button"
+              class="group/session relative flex h-7 w-full items-center gap-1.5 rounded-[var(--radius-sm)] px-2 text-left transition-[color,background-color,box-shadow] active:bg-[var(--accent-tint-strong)]"
+              :class="
+                sessions.currentId === session.id
+                  ? 'bg-[var(--accent-tint)] text-[var(--text-primary)]'
+                  : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+              "
+              :aria-current="sessions.currentId === session.id ? 'page' : undefined"
+              :title="session.name || session.firstMessage"
+              @click="openSession(session)"
+              @contextmenu="onContextMenu(session, $event)"
+            >
+              <GitBranch
+                v-if="session.worktreeBranch"
+                class="size-3 shrink-0 text-[var(--text-tertiary)]"
+                :stroke-width="1.75"
+              />
+              <Pin
+                v-if="workspace.isSessionPinned(session.id)"
+                class="size-3 shrink-0 text-[var(--text-tertiary)]"
+                :stroke-width="1.75"
+                :aria-label="$t('workspace.pinned')"
+              />
+              <span class="min-w-0 flex-1 truncate text-[12px] text-current">
+                {{ session.name || session.firstMessage || session.id }}
+              </span>
+              <span
+                v-if="running(session.id)"
+                class="size-1.5 shrink-0 rounded-full bg-[var(--success)]"
+                :title="$t('workspace.running')"
+              />
+            </button>
           </div>
         </div>
-      </template>
-      <FileExplorer v-else-if="section === 'files'" />
-      <WorktreeSwitcher v-else />
+      </div>
+    </div>
+
+    <div class="shrink-0 border-t border-[var(--border-subtle)] p-1.5">
+      <button
+        type="button"
+        class="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        @click="router.push('/settings')"
+      >
+        <Settings class="size-4 shrink-0" :stroke-width="1.75" />
+        {{ $t('nav.settings') }}
+      </button>
     </div>
 
     <div

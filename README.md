@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-1.1.0-4C8DFF?style=flat-square" />
+  <img alt="version" src="https://img.shields.io/badge/version-0.0.1-4C8DFF?style=flat-square" />
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0--only-663399?style=flat-square" />
   <img alt="platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-6B7280?style=flat-square" />
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D22-43853D?style=flat-square" />
@@ -29,7 +29,7 @@ Pi-Harness manages Pi providers, models, credentials, skills, raw configuration,
 
 Secrets never appear in the renderer as plaintext. macOS stores them in the system Keychain; Windows and Linux use Electron `safeStorage`. Unknown Pi fields are preserved.
 
-## v1.1.0 highlights
+## v0.0.1 highlights
 
 - A shared Capability Layer now models Skills, Extensions, Packages, MCP, and Presets while Pi remains the only Agent Runtime.
 - The Skills page includes a compact Featured section with Odai as a regular `skill` capability for agent governance and verified task execution.
@@ -146,10 +146,10 @@ Domain stays decoupled from Pi native JSON via an Adapter. Unknown fields pass t
 
 ## Author
 
-[wangmiao](https://github.com/wangmiaozero) · [tuziling84@gmail.com](mailto:tuziling84@gmail.com) · [github.com/wangmiaozero/pi-harness](https://github.com/wangmiaozero/pi-harness)
+[yuguaa](https://github.com/yuguaa) · [280722781@qq.com](mailto:280722781@qq.com) · [github.com/yuguaa/pi-harness](https://github.com/yuguaa/pi-harness)
 
 ## License
 
 Pi-Harness is free software licensed under the [GNU Affero General Public License v3.0 only](./LICENSE) (`AGPL-3.0-only`). You may use, modify, and redistribute it under the license terms. Modified versions made available over a network must offer their corresponding source to users as required by AGPL v3.
 
-Copyright © 2026 [wangmiao](https://github.com/wangmiaozero).
+Copyright © 2026 [wangmiao](https://github.com/wangmiaozero), [yuguaa](https://github.com/yuguaa).

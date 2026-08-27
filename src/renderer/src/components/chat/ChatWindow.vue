@@ -18,6 +18,8 @@ import { callApi, getApi } from '@renderer/composables/useApi'
 import { useCompletionSound } from '@renderer/composables/useCompletionSound'
 import { normalizeMascotStyle } from '@shared/constants/mascot'
 import { usePetStore } from '@renderer/stores/pet'
+import { useConversationChangesStore } from '@renderer/stores/conversation-changes'
+import ConversationChangesBar from './ConversationChangesBar.vue'
 
 const { locale } = useI18n()
 const agent = useAgentStore()
@@ -26,6 +28,7 @@ const workspace = useWorkspaceStore()
 const models = useModelsStore()
 const settings = useSettingsStore()
 const pet = usePetStore()
+const changes = useConversationChangesStore()
 const scroller = ref<HTMLElement | null>(null)
 const scrollContent = ref<HTMLElement | null>(null)
 const composer = ref<InstanceType<typeof ChatComposer> | null>(null)
@@ -62,6 +65,12 @@ const displayMessages = computed(() => {
   const live = agent.streaming.streamingMessage
   return live ? [...agent.messages, live] : agent.messages
 })
+
+const changeSteps = computed(() => (sessions.currentId ? changes.stepsFor(sessions.currentId) : []))
+
+function previewChange(filePath: string): void {
+  workspace.showInspectorDiff(filePath)
+}
 
 function updateScrollState() {
   const el = scroller.value
@@ -374,6 +383,12 @@ function duration(value: number): string {
           <p v-if="agent.error" class="mt-2 text-[12px] text-[var(--danger)]">
             {{ agent.error }}
           </p>
+          <ConversationChangesBar
+            v-for="step in changeSteps"
+            :key="step.stepId"
+            :step="step"
+            @preview="previewChange"
+          />
         </div>
       </div>
       <MascotView

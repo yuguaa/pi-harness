@@ -5,7 +5,7 @@ import WorkspaceSidebar from '@renderer/components/workspace/WorkspaceSidebar.vu
 import WorkspaceTabs from '@renderer/components/workspace/WorkspaceTabs.vue'
 import ChatWindow from '@renderer/components/chat/ChatWindow.vue'
 import FileViewer from '@renderer/components/files/FileViewer.vue'
-import GitDiffView from '@renderer/components/git/GitDiffView.vue'
+import WorkspaceInspector from '@renderer/components/workspace/WorkspaceInspector.vue'
 import EmptyState from '@renderer/components/ui/EmptyState.vue'
 import { FolderOpen } from '@lucide/vue'
 import { useSessionStore } from '@renderer/stores/sessions'
@@ -160,8 +160,8 @@ watch(
       <div v-else class="min-h-0 flex-1 overflow-hidden">
         <ChatWindow v-if="activeKind === 'chat'" ref="chatWindow" />
         <FileViewer v-else-if="activeKind === 'file'" />
-        <GitDiffView v-else-if="activeKind === 'diff'" />
       </div>
     </section>
+    <WorkspaceInspector />
   </div>
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SettingsNav from '@renderer/components/layout/SettingsNav.vue'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -1163,6 +1164,7 @@ function resourceGroups(pkg: PiPackageInfo) {
         </template>
       </div>
     </header>
+    <SettingsNav />
 
     <div class="flex min-h-0 flex-1">
       <div class="flex min-h-0 w-[320px] shrink-0 flex-col border-r border-[var(--border-subtle)]">

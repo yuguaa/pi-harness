@@ -120,6 +120,7 @@ export function isRunningStateEvent(type: string): boolean {
     type === 'agent_start' ||
     type === 'agent_end' ||
     type === 'agent_settled' ||
+    type === 'prompt_done' ||
     isCompactionEvent(type)
   )
 }

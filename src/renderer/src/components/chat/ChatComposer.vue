@@ -6,6 +6,7 @@ import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
 import Select from '@renderer/components/ui/Select.vue'
 import ComposerOptionMenu from './ComposerOptionMenu.vue'
+import QueuedMessageList from './queued-message-list.vue'
 import { shouldSendComposerKey } from './composer-keys'
 import { useWorkspaceStore, type ChatDraftImage } from '@renderer/stores/workspace'
 import { useAgentStore } from '@renderer/stores/agent'
@@ -41,8 +42,9 @@ const dragActive = ref(false)
 const pendingImageCount = ref(0)
 let dragDepth = 0
 
-const busy = computed(
-  () => agent.sending || agent.streaming.isStreaming || agent.state?.isPromptRunning === true
+const busy = computed(() => agent.isBusy(sessions.currentId))
+const pendingQueue = computed(() =>
+  agent.pendingQueue.filter((item) => item.sessionId === sessions.currentId)
 )
 const compactAvailable = computed(() => canCompactSession(agent.messages, agent.state, busy.value))
 const canSend = computed(() => Boolean(workspace.draft.trim() || workspace.draftImages.length))
@@ -312,39 +314,11 @@ async function onCompact() {
         </button>
       </div>
     </div>
-    <div v-if="agent.pendingQueue.length" class="mb-2 space-y-1.5" data-testid="composer-queue">
-      <div
-        v-for="item in agent.pendingQueue"
-        :key="item.id"
-        class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface-raised)] px-2.5 py-1.5"
-      >
-        <span
-          class="shrink-0 text-[10px] font-medium uppercase tracking-[0.05em] text-[var(--text-tertiary)]"
-        >
-          {{ $t('workspace.queued') }}
-        </span>
-        <span class="min-w-0 flex-1 truncate text-[12px] text-[var(--text-secondary)]">
-          {{ item.message }}
-        </span>
-        <button
-          type="button"
-          class="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent)] transition-colors hover:bg-[var(--accent-tint)]"
-          :title="$t('workspace.steerQueued')"
-          @click="agent.steerQueued(item.id)"
-        >
-          {{ $t('workspace.steerQueued') }}
-        </button>
-        <button
-          type="button"
-          class="flex size-5 shrink-0 items-center justify-center rounded text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          :title="$t('common.delete')"
-          :aria-label="$t('common.delete')"
-          @click="agent.removeQueued(item.id)"
-        >
-          <X class="size-3" :stroke-width="1.75" />
-        </button>
-      </div>
-    </div>
+    <QueuedMessageList
+      :items="pendingQueue"
+      @steer="agent.steerQueued"
+      @remove="agent.removeQueued"
+    />
     <div
       class="relative overflow-hidden rounded-[var(--radius-sm)] border bg-[var(--control-bg)] shadow-[var(--control-shadow)] transition-[background-color,border-color] duration-[var(--motion-fast)] ease-[var(--ease-out)] hover:bg-[var(--control-bg-hover)]"
       :class="

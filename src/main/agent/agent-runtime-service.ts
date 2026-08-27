@@ -108,7 +108,7 @@ export class AgentSessionWrapper {
         if (imageError) throw new AgentError(imageError)
         const release = await this.acquirePromptAdmission()
         try {
-          if (this.inner.isBashRunning) {
+          if (this.inner.isBashRunning && !command.streamingBehavior) {
             throw new AgentError('Cannot send a prompt while a shell command is running')
           }
           let preflightAccepted = false
@@ -135,10 +135,11 @@ export class AgentSessionWrapper {
             this.pendingPromptCount = Math.max(0, this.pendingPromptCount - 1)
             this.resetIdleTimer()
           }
-          this.pendingPromptCount += 1
           const images = command.images as
             Array<{ type: 'image'; data: string; mimeType: string }> | undefined
           const streamingBehavior = command.streamingBehavior as 'steer' | 'followUp' | undefined
+          const joinsActivePrompt = Boolean(streamingBehavior) && this.isRunning()
+          this.pendingPromptCount += 1
           let prompt: Promise<void>
           try {
             prompt = this.inner.prompt(String(command.message ?? ''), {
@@ -157,8 +158,8 @@ export class AgentSessionWrapper {
             () => {
               acceptPreflight()
               finishPrompt()
-              /* steer 只是调整方向，不视为完整一问一答；其余（含 followUp）都要追踪变更。 */
-              if (streamingBehavior !== 'steer') this.emit({ type: 'prompt_done' })
+              /* 运行中插入或追加的消息由外层 prompt 统一结算，不重复发出完成事件。 */
+              if (!joinsActivePrompt) this.emit({ type: 'prompt_done' })
             },
             (error) => {
               rejectPreflight(error)
@@ -168,7 +169,7 @@ export class AgentSessionWrapper {
                   type: 'prompt_error',
                   errorMessage: error instanceof Error ? error.message : String(error)
                 })
-                if (streamingBehavior !== 'steer') this.emit({ type: 'prompt_done' })
+                if (!joinsActivePrompt) this.emit({ type: 'prompt_done' })
               }
             }
           )
@@ -507,12 +508,7 @@ export class AgentRuntimeService {
   ): Promise<unknown> {
     const wrapper = await this.require(sessionId)
     return wrapper.send({
-      type:
-        extras.streamingBehavior === 'steer'
-          ? 'steer'
-          : extras.streamingBehavior === 'followUp'
-            ? 'follow_up'
-            : 'prompt',
+      type: 'prompt',
       message,
       images: extras.images,
       streamingBehavior: extras.streamingBehavior

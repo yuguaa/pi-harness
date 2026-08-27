@@ -101,6 +101,57 @@ describe('conversation changes', () => {
     expect(store.stepsFor('s1')).toHaveLength(0)
   })
 
+  it('captures an initially dirty file that becomes clean during the conversation', async () => {
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(textPreview('dirty-before'))
+      .mockResolvedValueOnce(textPreview('head'))
+    const status = vi
+      .fn()
+      .mockResolvedValueOnce(statusResponse([modifiedFile('/r/a.ts')]))
+      .mockResolvedValueOnce(statusResponse([]))
+    window.piSwitch = {
+      git: { status },
+      files: { read }
+    } as unknown as PiSwitchAPI
+
+    const store = useConversationChangesStore()
+    await store.beginConversation('s1', '/r')
+    await store.finishConversation('s1', false)
+
+    expect(store.stepsFor('s1')[0]?.files[0]).toMatchObject({
+      filePath: '/r/a.ts',
+      status: 'modified',
+      before: 'dirty-before',
+      after: 'head'
+    })
+  })
+
+  it('does not report a file that was already deleted before the conversation', async () => {
+    const deleted: GitFileStatus = {
+      filePath: '/r/a.ts',
+      status: 'deleted',
+      code: 'D',
+      indexStatus: ' ',
+      worktreeStatus: 'D'
+    }
+    const read = vi.fn().mockRejectedValue(new Error('missing'))
+    const status = vi
+      .fn()
+      .mockResolvedValueOnce(statusResponse([deleted]))
+      .mockResolvedValueOnce(statusResponse([deleted]))
+    window.piSwitch = {
+      git: { status },
+      files: { read }
+    } as unknown as PiSwitchAPI
+
+    const store = useConversationChangesStore()
+    await store.beginConversation('s1', '/r')
+    await store.finishConversation('s1', false)
+
+    expect(store.stepsFor('s1')).toHaveLength(0)
+  })
+
   it('does not track changes outside a git repository', async () => {
     const status = vi.fn().mockResolvedValue({
       isGitRepository: false,

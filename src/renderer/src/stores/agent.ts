@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { reactive, ref, shallowRef } from 'vue'
+import { computed, reactive, ref, shallowRef } from 'vue'
 import type {
   AgentEvent,
   AgentImageAttachment,
@@ -41,6 +41,12 @@ interface QueuedMessage {
   message: string
   images: AgentImageAttachment[]
   preset: ToolPreset
+  thinkingLevel: string
+}
+
+interface DispatchResult {
+  accepted: boolean
+  sessionId: string | null
 }
 
 export const useAgentStore = defineStore('agent', () => {
@@ -55,18 +61,24 @@ export const useAgentStore = defineStore('agent', () => {
   const toolExecutions = reactive(new Map<string, ToolExecution>())
   /** 等待执行的本地消息队列（Agent 忙时入队）。 */
   const pendingQueue = ref<QueuedMessage[]>([])
+  const activePromptIds = reactive(new Set<string>())
   const thinkingLevel = ref('auto')
   const toolPreset = ref<ToolPreset>('default')
   const sessionStats = shallowRef<SessionStats | null>(null)
   const completionCount = ref(0)
   const error = ref<string | null>(null)
-  const sending = ref(false)
+  const sendingCount = ref(0)
+  const sending = computed(() => sendingCount.value > 0)
   let loadedDetail: SessionDetail | null = null
   let loadedStatsOverride: Partial<SessionStats> | null = null
   let loadedSessionId: string | null = null
   let loadGeneration = 0
   const composerSelections = new Map<string, { thinkingLevel: string; toolPreset: ToolPreset }>()
   const transientSessionIds = new Set<string>()
+  const failedPromptIds = new Set<string>()
+  const queueActionIds = new Set<string>()
+  const settlingIds = reactive(new Set<string>())
+  const settlementTails = new Map<string, Promise<void>>()
   let unsubEvent: (() => void) | null = null
   let unsubRunning: (() => void) | null = null
 
@@ -76,13 +88,13 @@ export const useAgentStore = defineStore('agent', () => {
     unsubEvent = getApi().on('agent-event', (payload) => {
       const body = payload as { sessionId?: string; event?: AgentEvent }
       if (!body.sessionId || !body.event) return
-      if (body.event.type === 'agent_end') void syncPersistedSession(body.sessionId)
-      if (body.sessionId !== loadedSessionId) return
+      if (body.event.type === 'prompt_error') failedPromptIds.add(body.sessionId)
       if (body.event.type === 'prompt_done') {
-        completionCount.value += 1
-        void useConversationChangesStore().finishConversation(body.sessionId, false)
-        void drainQueue(body.sessionId)
+        activePromptIds.delete(body.sessionId)
+        settlePrompt(body.sessionId, failedPromptIds.delete(body.sessionId))
       }
+      if (body.sessionId !== loadedSessionId) return
+      if (body.event.type === 'prompt_done') completionCount.value += 1
       applyEvent(body.event)
     })
     unsubRunning = getApi().on('agent-running', (payload) => {
@@ -164,7 +176,6 @@ export const useAgentStore = defineStore('agent', () => {
       case 'prompt_error':
         error.value = String(event.errorMessage ?? 'Agent error')
         streaming.value = streamReducer(streaming.value, { type: 'end' })
-        void useConversationChangesStore().finishConversation(loadedSessionId, true)
         break
       case 'compaction_start':
       case 'auto_compaction_start':
@@ -275,8 +286,23 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  function isBusy(): boolean {
-    return sending.value || streaming.value.isStreaming || state.value?.isPromptRunning === true
+  function isSessionOccupied(sessionId: string): boolean {
+    return (
+      activePromptIds.has(sessionId) ||
+      runningIds.value.includes(sessionId) ||
+      settlingIds.has(sessionId) ||
+      queueActionIds.has(sessionId) ||
+      (loadedSessionId === sessionId &&
+        (streaming.value.isStreaming || state.value?.isPromptRunning === true))
+    )
+  }
+
+  function isBusy(sessionId: string | null): boolean {
+    if (!sessionId) return sending.value
+    return (
+      isSessionOccupied(sessionId) ||
+      pendingQueue.value.some((item) => item.sessionId === sessionId)
+    )
   }
 
   async function send(
@@ -288,6 +314,198 @@ export const useAgentStore = defineStore('agent', () => {
   ) {
     if (!message.trim() && !images.length) return
     error.value = null
+    const sessionOccupied = sessionId ? isSessionOccupied(sessionId) : sending.value
+    const hasQueuedMessages = Boolean(
+      sessionId && pendingQueue.value.some((item) => item.sessionId === sessionId)
+    )
+    if (sessionOccupied || hasQueuedMessages) {
+      pendingQueue.value = [
+        ...pendingQueue.value,
+        {
+          id: crypto.randomUUID(),
+          sessionId,
+          cwd,
+          message,
+          images,
+          preset,
+          thinkingLevel: thinkingLevel.value
+        }
+      ]
+      if (sessionId && !sessionOccupied) void drainQueue(sessionId)
+      return sessionId
+    }
+
+    const result = await dispatch(sessionId, cwd, message, preset, thinkingLevel.value, images, {
+      appendOptimistic: true
+    })
+    return result.sessionId
+  }
+
+  async function dispatch(
+    sessionId: string | null,
+    cwd: string | null,
+    message: string,
+    preset: ToolPreset,
+    promptThinkingLevel: string,
+    images: AgentImageAttachment[],
+    options: { appendOptimistic?: boolean } = {}
+  ): Promise<DispatchResult> {
+    const optimistic = options.appendOptimistic ? appendOptimisticMessage(message, images) : null
+    sendingCount.value += 1
+    error.value = null
+    let createdSessionId: string | null = null
+    let trackedSessionId = sessionId
+    if (sessionId) activePromptIds.add(sessionId)
+    try {
+      if (!sessionId) {
+        if (!cwd) throw new Error('No project cwd')
+        const started = await callApi(() =>
+          getApi().agent.start({
+            cwd,
+            toolNames: getToolNamesForPreset(preset),
+            ...(promptThinkingLevel !== 'auto' ? { thinkingLevel: promptThinkingLevel } : {})
+          })
+        )
+        loadedSessionId = started.sessionId
+        transientSessionIds.add(started.sessionId)
+        composerSelections.set(started.sessionId, {
+          thinkingLevel: thinkingLevel.value,
+          toolPreset: preset
+        })
+        toolPreset.value = preset
+        createdSessionId = started.sessionId
+        trackedSessionId = started.sessionId
+        activePromptIds.add(started.sessionId)
+        bindPendingSession(cwd, started.sessionId)
+        useSessionStore().addTransientSession(
+          started.sessionId,
+          started.cwd,
+          message.trim() || '[image]'
+        )
+        await useConversationChangesStore().beginConversation(started.sessionId, started.cwd)
+        await callApi(() =>
+          getApi().agent.prompt({
+            sessionId: started.sessionId,
+            message,
+            ...(images.length ? { images } : {})
+          })
+        )
+        return { accepted: true, sessionId: started.sessionId }
+      }
+      const started = await callApi(() =>
+        getApi().agent.start({
+          sessionId,
+          toolNames: getToolNamesForPreset(preset),
+          ...(promptThinkingLevel !== 'auto' ? { thinkingLevel: promptThinkingLevel } : {})
+        })
+      )
+      if (started.sessionId !== sessionId) activePromptIds.delete(sessionId)
+      trackedSessionId = started.sessionId
+      activePromptIds.add(started.sessionId)
+      await useConversationChangesStore().beginConversation(started.sessionId, started.cwd)
+      await callApi(() =>
+        getApi().agent.prompt({
+          sessionId: started.sessionId,
+          message,
+          ...(images.length ? { images } : {})
+        })
+      )
+      return { accepted: true, sessionId: started.sessionId }
+    } catch (e) {
+      if (trackedSessionId) activePromptIds.delete(trackedSessionId)
+      if (trackedSessionId) useConversationChangesStore().cancelConversation(trackedSessionId)
+      error.value = (e as { message?: string }).message ?? String(e)
+      if (optimistic) messages.value = messages.value.filter((entry) => entry !== optimistic)
+      if (createdSessionId) {
+        transientSessionIds.delete(createdSessionId)
+        composerSelections.delete(createdSessionId)
+        useSessionStore().removeTransientSession(createdSessionId)
+      }
+      return { accepted: false, sessionId }
+    } finally {
+      sendingCount.value = Math.max(0, sendingCount.value - 1)
+    }
+  }
+
+  async function drainQueue(sessionId: string): Promise<void> {
+    if (queueActionIds.has(sessionId)) return
+    const index = pendingQueue.value.findIndex((item) => item.sessionId === sessionId)
+    if (index === -1) return
+    const next = pendingQueue.value[index]
+    pendingQueue.value = pendingQueue.value.filter((_, itemIndex) => itemIndex !== index)
+    const result = await dispatch(
+      sessionId,
+      next.cwd,
+      next.message,
+      next.preset,
+      next.thinkingLevel,
+      next.images,
+      { appendOptimistic: loadedSessionId === sessionId }
+    )
+    if (!result.accepted) insertQueued(index, next)
+  }
+
+  async function steerQueued(queueId: string): Promise<void> {
+    const index = pendingQueue.value.findIndex((item) => item.id === queueId)
+    if (index === -1) return
+    const item = pendingQueue.value[index]
+    if (!item.sessionId || item.sessionId !== loadedSessionId) return
+    const targetId = item.sessionId
+    queueActionIds.add(targetId)
+    pendingQueue.value = pendingQueue.value.filter((entry) => entry.id !== queueId)
+    try {
+      const snapshot = await callApi(() => getApi().agent.state(targetId))
+      const runtimeBusy = Boolean(
+        snapshot?.isStreaming || snapshot?.isPromptRunning || snapshot?.isBashRunning
+      )
+      if (runtimeBusy) {
+        await callApi(() =>
+          getApi().agent.prompt({
+            sessionId: targetId,
+            message: item.message,
+            streamingBehavior: 'steer',
+            ...(item.images.length ? { images: item.images } : {})
+          })
+        )
+        return
+      }
+      const result = await dispatch(
+        targetId,
+        item.cwd,
+        item.message,
+        item.preset,
+        item.thinkingLevel,
+        item.images,
+        { appendOptimistic: true }
+      )
+      if (!result.accepted) insertQueued(index, item)
+    } catch (cause) {
+      error.value = (cause as { message?: string }).message ?? String(cause)
+      insertQueued(index, item)
+    } finally {
+      queueActionIds.delete(targetId)
+    }
+  }
+
+  function removeQueued(queueId: string): void {
+    pendingQueue.value = pendingQueue.value.filter((entry) => entry.id !== queueId)
+  }
+
+  function insertQueued(index: number, item: QueuedMessage): void {
+    pendingQueue.value = [
+      ...pendingQueue.value.slice(0, index),
+      item,
+      ...pendingQueue.value.slice(index)
+    ]
+  }
+
+  function bindPendingSession(cwd: string | null, sessionId: string): void {
+    pendingQueue.value = pendingQueue.value.map((item) =>
+      item.sessionId === null && item.cwd === cwd ? { ...item, sessionId } : item
+    )
+  }
+
+  function appendOptimisticMessage(message: string, images: AgentImageAttachment[]): AgentMessage {
     const imageBlocks: ImageContent[] = images.map((image) => ({
       type: 'image',
       source: { type: 'base64', media_type: image.mimeType, data: image.data }
@@ -299,116 +517,24 @@ export const useAgentStore = defineStore('agent', () => {
       timestamp: Date.now()
     }
     messages.value = [...messages.value, optimistic]
-
-    /* Agent 忙时入队，不立即发送；空闲时直接派发。 */
-    if (isBusy()) {
-      pendingQueue.value = [
-        ...pendingQueue.value,
-        { id: crypto.randomUUID(), sessionId, cwd, message, images, preset }
-      ]
-      return sessionId
-    }
-
-    return dispatch(sessionId, cwd, message, preset, images)
+    return optimistic
   }
 
-  async function dispatch(
-    sessionId: string | null,
-    cwd: string | null,
-    message: string,
-    preset: ToolPreset,
-    images: AgentImageAttachment[]
-  ): Promise<string | null> {
-    sending.value = true
-    error.value = null
-    let createdSessionId: string | null = null
-    try {
-      if (!sessionId) {
-        if (!cwd) throw new Error('No project cwd')
-        const started = await callApi(() =>
-          getApi().agent.start({
-            cwd,
-            toolNames: getToolNamesForPreset(preset),
-            ...(thinkingLevel.value !== 'auto' ? { thinkingLevel: thinkingLevel.value } : {})
-          })
-        )
-        loadedSessionId = started.sessionId
-        transientSessionIds.add(started.sessionId)
-        composerSelections.set(started.sessionId, {
-          thinkingLevel: thinkingLevel.value,
-          toolPreset: preset
-        })
-        toolPreset.value = preset
-        createdSessionId = started.sessionId
-        useSessionStore().addTransientSession(
-          started.sessionId,
-          started.cwd,
-          message.trim() || '[image]'
-        )
-        void useConversationChangesStore().beginConversation(started.sessionId, started.cwd)
-        await callApi(() =>
-          getApi().agent.prompt({
-            sessionId: started.sessionId,
-            message,
-            ...(images.length ? { images } : {})
-          })
-        )
-        return started.sessionId
+  function settlePrompt(sessionId: string, failed: boolean): void {
+    const previous = settlementTails.get(sessionId) ?? Promise.resolve()
+    settlingIds.add(sessionId)
+    const task = previous
+      .catch(() => undefined)
+      .then(() => useConversationChangesStore().finishConversation(sessionId, failed))
+      .then(() => syncPersistedSession(sessionId).catch(() => undefined))
+      .then(() => drainQueue(sessionId))
+    settlementTails.set(sessionId, task)
+    void task.finally(() => {
+      if (settlementTails.get(sessionId) === task) {
+        settlementTails.delete(sessionId)
+        settlingIds.delete(sessionId)
       }
-      void useConversationChangesStore().beginConversation(sessionId, cwd)
-      await callApi(() =>
-        getApi().agent.start({
-          sessionId,
-          toolNames: getToolNamesForPreset(toolPreset.value),
-          ...(thinkingLevel.value !== 'auto' ? { thinkingLevel: thinkingLevel.value } : {})
-        })
-      )
-      await callApi(() =>
-        getApi().agent.prompt({ sessionId, message, ...(images.length ? { images } : {}) })
-      )
-      return sessionId
-    } catch (e) {
-      error.value = (e as { message?: string }).message ?? String(e)
-      messages.value = messages.value.slice(0, -1)
-      if (createdSessionId) {
-        transientSessionIds.delete(createdSessionId)
-        composerSelections.delete(createdSessionId)
-        useSessionStore().removeTransientSession(createdSessionId)
-      }
-      return sessionId
-    } finally {
-      sending.value = false
-    }
-  }
-
-  async function drainQueue(sessionId: string): Promise<void> {
-    const next = pendingQueue.value[0]
-    if (!next) return
-    pendingQueue.value = pendingQueue.value.slice(1)
-    const targetId = next.sessionId ?? sessionId
-    if (!targetId) return
-    await dispatch(targetId, next.cwd, next.message, next.preset, next.images)
-  }
-
-  async function steerQueued(queueId: string): Promise<void> {
-    const index = pendingQueue.value.findIndex((item) => item.id === queueId)
-    if (index === -1) return
-    const item = pendingQueue.value[index]
-    pendingQueue.value = pendingQueue.value.filter((entry) => entry.id !== queueId)
-    const targetId = item.sessionId ?? loadedSessionId
-    if (!targetId) return
-    await callApi(() =>
-      getApi().agent.prompt({
-        sessionId: targetId,
-        message: item.message,
-        streamingBehavior: 'steer',
-        ...(item.images.length ? { images: item.images } : {})
-      })
-    )
-  }
-
-  function removeQueued(queueId: string): void {
-    pendingQueue.value = pendingQueue.value.filter((entry) => entry.id !== queueId)
+    })
   }
 
   async function abort(sessionId: string) {
@@ -544,6 +670,7 @@ export const useAgentStore = defineStore('agent', () => {
     setupListeners,
     load,
     reconcile,
+    isBusy,
     send,
     steerQueued,
     removeQueued,

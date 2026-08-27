@@ -48,6 +48,71 @@ describe('AgentRuntimeService', () => {
 
     expect(result).toEqual({ cancelled: true, reason: 'session-too-small' })
   })
+
+  it('uses prompt streaming behavior so an idle steer starts a normal run', async () => {
+    const inner = createAgentSession(createSessionManager())
+    const wrapper = new AgentSessionWrapper(inner)
+    const events: string[] = []
+    wrapper.onEvent((event) => events.push(event.type))
+
+    await wrapper.send({ type: 'prompt', message: 'guide', streamingBehavior: 'steer' })
+    await vi.waitFor(() => expect(events).toContain('prompt_done'))
+
+    expect(inner.prompt).toHaveBeenCalledWith(
+      'guide',
+      expect.objectContaining({ streamingBehavior: 'steer', source: 'rpc' })
+    )
+  })
+
+  it.each(['steer', 'followUp'] as const)(
+    'emits one completion event when %s joins an active prompt',
+    async (streamingBehavior) => {
+      const inner = createAgentSession(createSessionManager())
+      let finishFirst: (() => void) | undefined
+      const firstPrompt = new Promise<void>((resolve) => {
+        finishFirst = resolve
+      })
+      inner.prompt = vi
+        .fn()
+        .mockImplementationOnce((_message: string, options?: Record<string, unknown>) => {
+          const preflight = options?.preflightResult as ((success: boolean) => void) | undefined
+          preflight?.(true)
+          return firstPrompt
+        })
+        .mockImplementationOnce((_message: string, options?: Record<string, unknown>) => {
+          const preflight = options?.preflightResult as ((success: boolean) => void) | undefined
+          preflight?.(true)
+          return Promise.resolve()
+        })
+      const wrapper = new AgentSessionWrapper(inner)
+      const events: string[] = []
+      wrapper.onEvent((event) => events.push(event.type))
+
+      await wrapper.send({ type: 'prompt', message: 'first' })
+      await wrapper.send({ type: 'prompt', message: 'guide', streamingBehavior })
+      await Promise.resolve()
+      expect(events).not.toContain('prompt_done')
+
+      finishFirst?.()
+      await vi.waitFor(() =>
+        expect(events.filter((event) => event === 'prompt_done')).toHaveLength(1)
+      )
+    }
+  )
+
+  it('accepts steer while a shell tool is running', async () => {
+    const inner = createAgentSession(createSessionManager())
+    inner.isBashRunning = true
+    const wrapper = new AgentSessionWrapper(inner)
+
+    await expect(
+      wrapper.send({ type: 'prompt', message: 'stop the command', streamingBehavior: 'steer' })
+    ).resolves.toBeNull()
+    expect(inner.prompt).toHaveBeenCalledWith(
+      'stop the command',
+      expect.objectContaining({ streamingBehavior: 'steer' })
+    )
+  })
 })
 
 function createSessionManager(): PiSessionManagerLike {

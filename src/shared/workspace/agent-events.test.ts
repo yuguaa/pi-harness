@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { streamReducer, INITIAL_STREAMING_STATE } from './streaming-message'
-import { toClientAgentEvent } from './agent-event-wire'
+import { isRunningStateEvent, toClientAgentEvent } from './agent-event-wire'
 import { startAgentSessionSchema, workspacePathSchema } from '../schemas/workspace'
 
 describe('agent event normalization', () => {
@@ -39,6 +39,10 @@ describe('agent event normalization', () => {
       event: { type: 'text_delta', contentIndex: 0, delta: 'lo' }
     })
     expect(state.streamingMessage?.content).toEqual([{ type: 'text', text: 'Hello' }])
+  })
+
+  it('refreshes running session ids when an outer prompt settles', () => {
+    expect(isRunningStateEvent('prompt_done')).toBe(true)
   })
 })
 

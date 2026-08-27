@@ -179,6 +179,7 @@ const bashText = computed(() => {
         </Suspense>
         <details
           v-else-if="block.type === 'thinking'"
+          open
           data-testid="thinking-details"
           class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2 py-1"
         >

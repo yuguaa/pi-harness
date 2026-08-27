@@ -6,7 +6,7 @@ import { callApi, getApi } from '@renderer/composables/useApi'
 /** 对话开始时的快照：记录当前已脏文件的内容，用于对比本轮的增量变更。 */
 interface Snapshot {
   cwd: string
-  dirtyBefore: Map<string, string>
+  dirtyBefore: Map<string, string | null>
 }
 
 const EMPTY_REVISION = '0'.repeat(64)
@@ -54,7 +54,11 @@ export const useConversationChangesStore = defineStore('conversation-changes', (
       await Promise.all(
         status.files.map(async (file) => {
           const text = await readText(file.filePath)
-          if (text !== null) snapshot.dirtyBefore.set(file.filePath, text)
+          if (text !== null) {
+            snapshot.dirtyBefore.set(file.filePath, text)
+            return
+          }
+          if (file.status === 'deleted') snapshot.dirtyBefore.set(file.filePath, null)
         })
       )
     } catch {
@@ -72,34 +76,39 @@ export const useConversationChangesStore = defineStore('conversation-changes', (
     try {
       const status = await callApi(() => getApi().git.status(snapshot.cwd))
       if (!status.isGitRepository) return
-      const changes: ConversationFileChange[] = []
-      await Promise.all(
-        status.files.map(async (file) => {
-          const after = await readText(file.filePath)
-          const dirtyBefore = snapshot.dirtyBefore.get(file.filePath)
-          let before: string | null
-          if (dirtyBefore !== undefined) {
-            before = dirtyBefore
-          } else {
-            const head = await callApi(() => getApi().git.showFile(snapshot.cwd, file.filePath))
-            before = head.content
-          }
-          /* before/after 相同说明本轮没有动它；无法读文本则不追踪内容。 */
-          if (before !== null && after !== null && before === after) return
-          if (before === null && after === null) return
-          const revertible = before !== null || after !== null
-          changes.push({
-            filePath: file.filePath,
-            status: file.status,
-            additions: 0,
-            deletions: 0,
-            before,
-            after,
-            reverted: false,
-            revertible
+      const filesAfter = new Map(status.files.map((file) => [file.filePath, file]))
+      const candidatePaths = new Set([...filesAfter.keys(), ...snapshot.dirtyBefore.keys()])
+      const changes = (
+        await Promise.all(
+          [...candidatePaths].map(async (filePath): Promise<ConversationFileChange | null> => {
+            const file = filesAfter.get(filePath)
+            const after = await readText(filePath)
+            const hadDirtyBefore = snapshot.dirtyBefore.has(filePath)
+            const dirtyBefore = snapshot.dirtyBefore.get(filePath)
+            let before: string | null
+            if (hadDirtyBefore) {
+              before = dirtyBefore ?? null
+            } else {
+              const head = await callApi(() => getApi().git.showFile(snapshot.cwd, filePath))
+              before = head.content
+            }
+            /* before/after 相同说明本轮没有动它；无法读文本则不追踪内容。 */
+            if (before !== null && after !== null && before === after) return null
+            if (before === null && after === null) return null
+            const revertible = before !== null || after !== null
+            return {
+              filePath,
+              status: file?.status ?? (after === null ? 'deleted' : 'modified'),
+              additions: 0,
+              deletions: 0,
+              before,
+              after,
+              reverted: false,
+              revertible
+            }
           })
-        })
-      )
+        )
+      ).filter((change): change is ConversationFileChange => change !== null)
       if (!changes.length) return
       const step: ConversationChangeStep = {
         stepId: `step-${Date.now()}-${++stepSeq}`,
@@ -137,17 +146,21 @@ export const useConversationChangesStore = defineStore('conversation-changes', (
     change.reverted = false
   }
 
+  function cancelConversation(sessionId: string): void {
+    snapshots.delete(sessionId)
+    pending.delete(sessionId)
+  }
+
   function clearSession(sessionId: string): void {
     stepsBySession.delete(sessionId)
-    for (const key of [...snapshots.keys()]) {
-      if (key === sessionId) snapshots.delete(key)
-    }
+    cancelConversation(sessionId)
   }
 
   return {
     stepsFor,
     beginConversation,
     finishConversation,
+    cancelConversation,
     revertFile,
     reapplyFile,
     clearSession

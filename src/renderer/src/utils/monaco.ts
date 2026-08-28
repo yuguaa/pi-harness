@@ -1,35 +1,56 @@
-import * as monaco from 'monaco-editor'
+import * as monaco from 'monaco-editor/editor/editor.api'
 import 'monaco-editor/basic-languages/monaco.contribution'
-import 'monaco-editor/language/json/monaco.contribution'
-import 'monaco-editor/language/typescript/monaco.contribution'
-import 'monaco-editor/language/css/monaco.contribution'
-import 'monaco-editor/language/html/monaco.contribution'
+import 'monaco-editor/features/find/register'
 
-// 语言服务 worker（vite `?worker` 打包）
 import editorWorker from 'monaco-editor/editor/editor.worker?worker'
-import jsonWorker from 'monaco-editor/language/json/json.worker?worker'
-import tsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
-import cssWorker from 'monaco-editor/language/css/css.worker?worker'
-import htmlWorker from 'monaco-editor/language/html/html.worker?worker'
 import { toMonacoThemeColor, toMonacoTokenColor } from './monaco-colors'
 
 /**
  * Monaco 编辑器集成：
- *  - 配置语言服务 worker
+ *  - 配置基础编辑器 worker
  *  - 注册 Pi-Harness Graphite 主题（深浅主题各一套，随 CSS 变量实时同步）
  *  - 文件名 → languageId 检测
  *  - unified diff patch 解析（供 DiffEditor 使用）
  */
 
 self.MonacoEnvironment = {
-  getWorker(_workerId: string, label: string) {
-    if (label === 'json') return new jsonWorker()
-    if (label === 'typescript' || label === 'javascript') return new tsWorker()
-    if (label === 'css' || label === 'scss' || label === 'less') return new cssWorker()
-    if (label === 'html' || label === 'handlebars' || label === 'razor') return new htmlWorker()
+  getWorker() {
     return new editorWorker()
   }
 } as monaco.Environment
+
+/** 仅注册 JSON/JSONC 词法高亮，不启用语言服务。 */
+monaco.languages.register({
+  id: 'json',
+  extensions: ['.json', '.jsonc'],
+  aliases: ['JSON', 'json'],
+  mimetypes: ['application/json']
+})
+monaco.languages.setMonarchTokensProvider('json', {
+  defaultToken: '',
+  tokenPostfix: '.json',
+  brackets: [
+    { open: '{', close: '}', token: 'delimiter.bracket' },
+    { open: '[', close: ']', token: 'delimiter.array' }
+  ],
+  tokenizer: {
+    root: [
+      [/[{}[\]]/, '@brackets'],
+      [/[,:]/, 'delimiter'],
+      [/\b(?:true|false|null)\b/, 'keyword'],
+      [/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/, 'number'],
+      [/"(?:\\.|[^"\\])*"(?=\s*:)/, 'string.key'],
+      [/"(?:\\.|[^"\\])*"/, 'string.value'],
+      [/\/\/.*$/, 'comment'],
+      [/\/\*/, 'comment', '@comment']
+    ],
+    comment: [
+      [/[^/*]+/, 'comment'],
+      [/\*\//, 'comment', '@pop'],
+      [/[/*]/, 'comment']
+    ]
+  }
+})
 
 const THEME_NAME = 'pi-graphite'
 

@@ -363,7 +363,11 @@ function duration(value: number): string {
         class="h-full min-h-0 overflow-y-auto px-4 py-3"
         @scroll.passive="onScrollerScroll"
       >
-        <div ref="scrollContent" data-testid="chat-content" class="mx-auto w-full max-w-[72ch]">
+        <div
+          ref="scrollContent"
+          data-testid="chat-content"
+          class="mx-auto w-full max-w-[var(--conversation-max-width)]"
+        >
           <EmptyState
             v-if="!displayMessages.length"
             :title="$t('workspace.emptyChat')"
@@ -385,7 +389,10 @@ function duration(value: number): string {
               @preview="previewChange"
             />
           </template>
-          <p v-if="agent.error" class="mx-auto mt-2 max-w-[72ch] text-[12px] text-[var(--danger)]">
+          <p
+            v-if="agent.error"
+            class="mx-auto mt-2 max-w-[var(--conversation-max-width)] text-[12px] text-[var(--danger)]"
+          >
             {{ agent.error }}
           </p>
           <ConversationChangesBar

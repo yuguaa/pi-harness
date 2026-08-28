@@ -219,7 +219,7 @@ const customLabel = computed(() => {
 <template>
   <article
     v-if="message.role !== 'custom' || message.display"
-    class="message-entry mx-auto flex w-full max-w-[72ch] flex-col py-4"
+    class="message-entry mx-auto flex w-full max-w-[var(--conversation-max-width)] flex-col py-4"
     :data-message-role="message.role"
     :class="[
       message.role === 'user' ? 'items-end' : 'items-start',
@@ -248,7 +248,7 @@ const customLabel = computed(() => {
     </template>
 
     <template v-else-if="message.role === 'assistant'">
-      <div class="message-assistant-row w-full max-w-[72ch]">
+      <div class="message-assistant-row w-full max-w-[var(--conversation-max-width)]">
         <div v-if="showMeta && streaming" class="message-meta message-meta--assistant">
           <span class="message-streaming">· {{ $t('workspace.streaming') }}</span>
         </div>
@@ -312,7 +312,7 @@ const customLabel = computed(() => {
     <details
       v-else-if="message.role === 'toolResult'"
       data-testid="tool-result-details"
-      class="work-trace message-body message-body--tool w-full max-w-[72ch]"
+      class="work-trace message-body message-body--tool w-full max-w-[var(--conversation-max-width)]"
       :open="message.isError || undefined"
     >
       <summary class="work-trace-summary">
@@ -340,7 +340,7 @@ const customLabel = computed(() => {
 
     <details
       v-else-if="message.role === 'bashExecution'"
-      class="work-trace message-body message-body--tool w-full max-w-[72ch]"
+      class="work-trace message-body message-body--tool w-full max-w-[var(--conversation-max-width)]"
     >
       <summary class="work-trace-summary">
         <span
@@ -365,7 +365,7 @@ const customLabel = computed(() => {
 
     <div
       v-else-if="message.role === 'custom' && message.display"
-      class="message-system message-body message-body--tool w-full max-w-[72ch]"
+      class="message-system message-body message-body--tool w-full max-w-[var(--conversation-max-width)]"
     >
       <div class="message-system-label">
         <span class="message-role-mark message-role-mark--system" aria-hidden="true">•</span>
@@ -376,7 +376,7 @@ const customLabel = computed(() => {
 
     <p
       v-else
-      class="message-body message-body--tool max-w-[72ch] whitespace-pre-wrap text-[13px] text-[var(--text-secondary)]"
+      class="message-body message-body--tool max-w-[var(--conversation-max-width)] whitespace-pre-wrap text-[13px] text-[var(--text-secondary)]"
     >
       {{ typeof message.content === 'string' ? message.content : '' }}
     </p>
@@ -398,7 +398,7 @@ const customLabel = computed(() => {
 .message-meta {
   display: flex;
   width: 100%;
-  max-width: 72ch;
+  max-width: var(--conversation-max-width);
   align-items: center;
   gap: var(--message-gap);
   margin-bottom: 5px;

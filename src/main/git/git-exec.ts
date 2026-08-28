@@ -10,13 +10,13 @@ const GIT_MAX_BUFFER = 8 * 1024 * 1024
 export async function gitExec(
   cwd: string,
   args: string[],
-  options: { timeout?: number; maxBuffer?: number } = {}
+  options: { timeout?: number; maxBuffer?: number; env?: NodeJS.ProcessEnv } = {}
 ): Promise<string> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', cwd, ...args], {
       timeout: options.timeout ?? GIT_TIMEOUT_MS,
       maxBuffer: options.maxBuffer ?? GIT_MAX_BUFFER,
-      env: { ...process.env, LC_ALL: 'C' }
+      env: { ...process.env, LC_ALL: 'C', ...options.env }
     })
     return stdout
   } catch (error) {

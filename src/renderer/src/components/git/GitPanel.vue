@@ -2,6 +2,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  CloudDownload,
   GitCommitHorizontal,
   ChevronRight,
   CircleDot,
@@ -15,9 +18,10 @@ import {
 import Button from '@renderer/components/ui/Button.vue'
 import Input from '@renderer/components/ui/Input.vue'
 import IconButton from '@renderer/components/ui/IconButton.vue'
+import Select from '@renderer/components/ui/Select.vue'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { callApi, getApi, getErrorPayload } from '@renderer/composables/useApi'
-import type { GitFileStatus, WorktreeInfo } from '@shared/types/workspace'
+import type { GitBranchState, GitFileStatus, WorktreeInfo } from '@shared/types/workspace'
 import { toast } from 'vue-sonner'
 import { askConfirm } from '@renderer/composables/useConfirmDialog'
 import { STATUS_COLORS, STATUS_LABELS } from '@renderer/utils/git-decoration'
@@ -40,6 +44,8 @@ const branch = ref('')
 const collapsedSections = ref<Set<string>>(new Set())
 const commitMessage = ref('')
 const activeMutation = ref<string | null>(null)
+const branchState = ref<GitBranchState | null>(null)
+const branchLoading = ref(false)
 
 /* ---------- 按区域分区 ---------- */
 
@@ -97,6 +103,17 @@ const stagedFileCount = computed(
 const canCommit = computed(
   () => stagedFileCount.value > 0 && commitMessage.value.trim().length > 0 && !activeMutation.value
 )
+const branchOptions = computed(() =>
+  (branchState.value?.branches ?? []).map((branch) => ({
+    value: `${branch.remote ? 'remote' : 'local'}:${branch.name}`,
+    label: branch.name
+  }))
+)
+const branchValue = computed({
+  get: () => (branchState.value?.currentBranch ? `local:${branchState.value.currentBranch}` : ''),
+  set: (value: string) => switchBranch(value)
+})
+const gitOperationBusy = computed(() => Boolean(activeMutation.value) || branchLoading.value)
 
 function areaLabel(area: GitArea): string {
   switch (area) {
@@ -149,7 +166,7 @@ function openDiff(filePath: string): void {
 }
 
 function refreshGit(): void {
-  void workspace.loadGit()
+  void Promise.all([workspace.loadGit(), loadBranchState()])
 }
 
 function sectionActionKind(area: GitArea): 'stage' | 'unstage' | null {
@@ -168,7 +185,9 @@ function sectionActionLabel(area: GitArea): string {
   return t(action === 'stage' ? 'workspace.stageAll' : 'workspace.unstageAll')
 }
 
-function mutationKey(action: 'stage' | 'unstage' | 'commit', scope: string): string {
+type GitMutation = 'stage' | 'unstage' | 'commit' | 'fetch' | 'pull' | 'push' | 'switch'
+
+function mutationKey(action: GitMutation, scope: string): string {
   return `${action}:${scope}`
 }
 
@@ -225,9 +244,71 @@ function commitChanges(): void {
   callApi(() => getApi().git.commit(cwd, message))
     .then(() => {
       commitMessage.value = ''
-      return workspace.loadGit()
+      return Promise.all([workspace.loadGit(), loadBranchState()])
     })
     .then(() => toast.success(t('workspace.commitCreated')))
+    .catch((error) => toast.error(getErrorPayload(error).message))
+    .finally(() => {
+      if (activeMutation.value === key) activeMutation.value = null
+    })
+}
+
+function loadBranchState(): Promise<void> {
+  const cwd = workspace.currentCwd
+  if (!cwd) {
+    branchState.value = null
+    return Promise.resolve()
+  }
+  branchLoading.value = true
+  return callApi(() => getApi().git.branches(cwd))
+    .then((state) => {
+      if (workspace.currentCwd === cwd) branchState.value = state
+    })
+    .catch(() => {
+      if (workspace.currentCwd === cwd) branchState.value = null
+    })
+    .finally(() => {
+      if (workspace.currentCwd === cwd) branchLoading.value = false
+    })
+}
+
+function refreshRepositoryState(): Promise<unknown> {
+  return Promise.all([workspace.loadGit(), loadBranchState(), refreshWorktrees()])
+}
+
+function switchBranch(value: string): void {
+  const cwd = workspace.currentCwd
+  if (!cwd || activeMutation.value) return
+  const separator = value.indexOf(':')
+  if (separator <= 0) return
+  const kind = value.slice(0, separator)
+  const branchName = value.slice(separator + 1)
+  if (!branchName || (kind !== 'local' && kind !== 'remote')) return
+  if (kind === 'local' && branchName === branchState.value?.currentBranch) return
+
+  const key = mutationKey('switch', branchName)
+  activeMutation.value = key
+  callApi(() => getApi().git.switchBranch(cwd, branchName, kind === 'remote'))
+    .then(() => {
+      workspace.inspectorPreview = null
+      workspace.inspectorDiffPath = null
+      return refreshRepositoryState()
+    })
+    .then(() => toast.success(t('workspace.branchSwitched', { branch: branchName })))
+    .catch((error) => toast.error(getErrorPayload(error).message))
+    .finally(() => {
+      if (activeMutation.value === key) activeMutation.value = null
+    })
+}
+
+function runRemoteAction(action: 'fetch' | 'pull' | 'push'): void {
+  const cwd = workspace.currentCwd
+  if (!cwd || activeMutation.value) return
+  const key = mutationKey(action, 'repository')
+  activeMutation.value = key
+  callApi(() => getApi().git[action](cwd))
+    .then(() => refreshRepositoryState())
+    .then(() => toast.success(t(`workspace.${action}Done`)))
     .catch((error) => toast.error(getErrorPayload(error).message))
     .finally(() => {
       if (activeMutation.value === key) activeMutation.value = null
@@ -277,14 +358,15 @@ async function removeWorktree(path: string) {
 }
 
 onMounted(() => {
-  void refreshWorktrees()
+  void Promise.all([refreshWorktrees(), loadBranchState()])
 })
 
 watch(
   () => workspace.currentCwd,
   () => {
     commitMessage.value = ''
-    void refreshWorktrees()
+    branchState.value = null
+    void Promise.all([refreshWorktrees(), loadBranchState()])
   }
 )
 </script>
@@ -339,6 +421,81 @@ watch(
             {{ $t('workspace.commit') }}
           </Button>
         </div>
+      </div>
+    </div>
+
+    <!-- 分支与远端同步 -->
+    <div
+      v-if="workspace.gitStatus?.isGitRepository"
+      data-testid="git-sync-controls"
+      class="flex shrink-0 flex-col gap-1.5 border-b border-[var(--border-subtle)] pb-2"
+    >
+      <div class="flex min-w-0 items-center gap-1">
+        <Select
+          v-model="branchValue"
+          data-testid="git-branch-select"
+          :options="branchOptions"
+          :placeholder="
+            branchState?.detached ? $t('workspace.detachedHead') : $t('workspace.branch')
+          "
+          :disabled="gitOperationBusy || !branchOptions.length"
+          mono
+          class="min-w-0 flex-1"
+        />
+        <IconButton
+          data-testid="git-fetch"
+          :label="$t('workspace.fetch')"
+          :disabled="gitOperationBusy || !branchState?.remotes.length"
+          @click="runRemoteAction('fetch')"
+        >
+          <LoaderCircle
+            v-if="isMutationActive(mutationKey('fetch', 'repository'))"
+            class="size-3.5 animate-spin"
+            :stroke-width="1.75"
+          />
+          <CloudDownload v-else class="size-3.5" :stroke-width="1.75" />
+        </IconButton>
+        <IconButton
+          data-testid="git-pull"
+          :label="$t('workspace.pullFastForwardOnly')"
+          :disabled="gitOperationBusy || !branchState?.upstream"
+          @click="runRemoteAction('pull')"
+        >
+          <LoaderCircle
+            v-if="isMutationActive(mutationKey('pull', 'repository'))"
+            class="size-3.5 animate-spin"
+            :stroke-width="1.75"
+          />
+          <ArrowDownToLine v-else class="size-3.5" :stroke-width="1.75" />
+        </IconButton>
+        <IconButton
+          data-testid="git-push"
+          :label="$t('workspace.push')"
+          :disabled="gitOperationBusy || !branchState?.currentBranch || !branchState.remotes.length"
+          @click="runRemoteAction('push')"
+        >
+          <LoaderCircle
+            v-if="isMutationActive(mutationKey('push', 'repository'))"
+            class="size-3.5 animate-spin"
+            :stroke-width="1.75"
+          />
+          <ArrowUpFromLine v-else class="size-3.5" :stroke-width="1.75" />
+        </IconButton>
+      </div>
+      <div
+        v-if="branchState?.currentBranch"
+        class="flex min-w-0 items-center gap-2 px-1 text-[10.5px] text-[var(--text-tertiary)]"
+      >
+        <GitBranch class="size-3 shrink-0" :stroke-width="1.75" />
+        <span class="min-w-0 flex-1 truncate">
+          {{ branchState.upstream || $t('workspace.noUpstream') }}
+        </span>
+        <span v-if="branchState.ahead" class="shrink-0 tabular-nums text-[var(--accent)]">
+          ↑{{ branchState.ahead }}
+        </span>
+        <span v-if="branchState.behind" class="shrink-0 tabular-nums text-[var(--warning)]">
+          ↓{{ branchState.behind }}
+        </span>
       </div>
     </div>
 

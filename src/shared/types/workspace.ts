@@ -263,6 +263,23 @@ export interface GitFileDiffResponse {
   patch?: string
 }
 
+export interface GitBranchInfo {
+  name: string
+  remote: boolean
+  current: boolean
+  upstream: string | null
+}
+
+export interface GitBranchState {
+  currentBranch: string | null
+  detached: boolean
+  upstream: string | null
+  ahead: number
+  behind: number
+  branches: GitBranchInfo[]
+  remotes: string[]
+}
+
 /** 一次对话（一问一答）对单个文件的变更记录。 */
 export interface ConversationFileChange {
   filePath: string

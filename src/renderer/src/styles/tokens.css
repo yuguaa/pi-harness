@@ -379,6 +379,7 @@
   --sidebar-width: 50px;
   --titlebar-height: 52px;
   --inspector-width: 320px;
+  --conversation-max-width: 72ch;
 
   /* Radius scale — never use rounded-xl/rounded-2xl in components. */
   --radius-xs: 3px;
@@ -419,6 +420,18 @@
   /* Backwards-compat: a few legacy components still reference these names. */
   --radius-sm-old: var(--radius-sm);
   --radius-md-old: var(--radius-md);
+}
+
+@media (min-width: 1440px) {
+  :root {
+    --conversation-max-width: 84ch;
+  }
+}
+
+@media (min-width: 1800px) {
+  :root {
+    --conversation-max-width: 96ch;
+  }
 }
 
 /* =============================================================================

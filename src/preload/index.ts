@@ -197,7 +197,13 @@ const api: PiSwitchAPI = {
     showFile: (cwd, filePath) => invoke(IPC_INVOKE.gitShowFile, { cwd, filePath }),
     stage: (cwd, filePaths) => invoke(IPC_INVOKE.gitStage, { cwd, filePaths }),
     unstage: (cwd, filePaths) => invoke(IPC_INVOKE.gitUnstage, { cwd, filePaths }),
-    commit: (cwd, message) => invoke(IPC_INVOKE.gitCommit, { cwd, message })
+    commit: (cwd, message) => invoke(IPC_INVOKE.gitCommit, { cwd, message }),
+    branches: (cwd) => invoke(IPC_INVOKE.gitBranches, cwd),
+    switchBranch: (cwd, branch, remote) =>
+      invoke(IPC_INVOKE.gitSwitchBranch, { cwd, branch, remote }),
+    fetch: (cwd) => invoke(IPC_INVOKE.gitFetch, cwd),
+    pull: (cwd) => invoke(IPC_INVOKE.gitPull, cwd),
+    push: (cwd) => invoke(IPC_INVOKE.gitPush, cwd)
   },
   worktrees: {
     list: (cwd) => invoke(IPC_INVOKE.worktreeList, cwd),

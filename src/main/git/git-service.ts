@@ -1,7 +1,12 @@
 import path from 'node:path'
 import { gitExec } from './git-exec'
 import type { FileAccessService } from '../files/file-access-service'
-import type { GitFileDiffResponse, GitStatusResponse } from '@shared/types/workspace'
+import type {
+  GitBranchInfo,
+  GitBranchState,
+  GitFileDiffResponse,
+  GitStatusResponse
+} from '@shared/types/workspace'
 import { GitError } from '../services/errors'
 import { classifyGitStatus, parseGitPorcelainV1 } from '@shared/workspace/git-status'
 import { TEXT_PREVIEW_MAX_BYTES } from '@shared/workspace/file-types'
@@ -12,6 +17,11 @@ import { readFile, realpath, stat } from 'node:fs/promises'
 function toGitPath(filePath: string): string {
   return filePath.split(path.sep).join('/')
 }
+
+const NETWORK_GIT_OPTIONS = {
+  timeout: 120_000,
+  env: { GIT_TERMINAL_PROMPT: '0' }
+} as const
 
 export class GitService {
   constructor(private readonly access: FileAccessService) {}
@@ -175,6 +185,133 @@ export class GitService {
     const normalizedMessage = message.trim()
     if (!normalizedMessage) throw new GitError('Commit message is required')
     await gitExec(repositoryRoot, ['commit', '-m', normalizedMessage])
+  }
+
+  async branches(cwd: string): Promise<GitBranchState> {
+    const realCwd = await this.access.assertAllowed(cwd, { mustExist: true })
+    const repositoryRoot = await this.resolveRepositoryRoot(realCwd)
+    const [currentBranch, refsOutput, remotesOutput] = await Promise.all([
+      gitExec(repositoryRoot, ['symbolic-ref', '--quiet', '--short', 'HEAD'])
+        .then((value) => value.trim() || null)
+        .catch(() => null),
+      gitExec(repositoryRoot, [
+        'for-each-ref',
+        '--format=%(refname)%00%(refname:short)%00%(upstream:short)',
+        'refs/heads',
+        'refs/remotes'
+      ]),
+      gitExec(repositoryRoot, ['remote'])
+    ])
+
+    const branches = refsOutput
+      .split(/\r?\n/)
+      .flatMap((line): GitBranchInfo[] => {
+        if (!line) return []
+        const [refName = '', name = '', upstream = ''] = line.split('\0')
+        const remote = refName.startsWith('refs/remotes/')
+        if (!name || (remote && name.endsWith('/HEAD'))) return []
+        return [
+          {
+            name,
+            remote,
+            current: !remote && name === currentBranch,
+            upstream: !remote && upstream ? upstream : null
+          }
+        ]
+      })
+      .sort(
+        (left, right) =>
+          Number(left.remote) - Number(right.remote) || left.name.localeCompare(right.name)
+      )
+
+    const current = branches.find((branch) => branch.current) ?? null
+    let ahead = 0
+    let behind = 0
+    if (current?.upstream) {
+      const counts = await gitExec(repositoryRoot, [
+        'rev-list',
+        '--left-right',
+        '--count',
+        'HEAD...@{upstream}'
+      ]).catch(() => '')
+      const [aheadValue, behindValue] = counts.trim().split(/\s+/).map(Number)
+      if (Number.isInteger(aheadValue)) ahead = aheadValue
+      if (Number.isInteger(behindValue)) behind = behindValue
+    }
+
+    return {
+      currentBranch,
+      detached: currentBranch === null,
+      upstream: current?.upstream ?? null,
+      ahead,
+      behind,
+      branches,
+      remotes: remotesOutput
+        .split(/\r?\n/)
+        .map((remote) => remote.trim())
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right))
+    }
+  }
+
+  async switchBranch(cwd: string, branch: string, remote: boolean): Promise<void> {
+    const realCwd = await this.access.assertAllowed(cwd, { mustExist: true })
+    const repositoryRoot = await this.resolveRepositoryRoot(realCwd)
+    const state = await this.branches(repositoryRoot)
+    const target = state.branches.find(
+      (candidate) => candidate.name === branch && candidate.remote === remote
+    )
+    if (!target) throw new GitError(`Branch not found: ${branch}`)
+    if (!remote) {
+      if (target.current) return
+      await gitExec(repositoryRoot, ['switch', target.name])
+      return
+    }
+
+    const remoteName = state.remotes
+      .sort((left, right) => right.length - left.length)
+      .find((name) => target.name.startsWith(`${name}/`))
+    if (!remoteName) throw new GitError(`Remote branch is invalid: ${target.name}`)
+    const localName = target.name.slice(remoteName.length + 1)
+    if (state.branches.some((candidate) => !candidate.remote && candidate.name === localName)) {
+      throw new GitError(`Local branch already exists: ${localName}`)
+    }
+    await gitExec(repositoryRoot, ['switch', '--track', '-c', localName, target.name])
+  }
+
+  async fetch(cwd: string): Promise<void> {
+    const realCwd = await this.access.assertAllowed(cwd, { mustExist: true })
+    const repositoryRoot = await this.resolveRepositoryRoot(realCwd)
+    await gitExec(repositoryRoot, ['fetch', '--all', '--prune'], NETWORK_GIT_OPTIONS)
+  }
+
+  async pull(cwd: string): Promise<void> {
+    const realCwd = await this.access.assertAllowed(cwd, { mustExist: true })
+    const repositoryRoot = await this.resolveRepositoryRoot(realCwd)
+    const state = await this.branches(repositoryRoot)
+    if (state.detached || !state.currentBranch) throw new GitError('Cannot pull in detached HEAD')
+    if (!state.upstream) throw new GitError(`Branch has no upstream: ${state.currentBranch}`)
+    await gitExec(repositoryRoot, ['pull', '--ff-only'], NETWORK_GIT_OPTIONS)
+  }
+
+  async push(cwd: string): Promise<void> {
+    const realCwd = await this.access.assertAllowed(cwd, { mustExist: true })
+    const repositoryRoot = await this.resolveRepositoryRoot(realCwd)
+    const state = await this.branches(repositoryRoot)
+    if (state.detached || !state.currentBranch) throw new GitError('Cannot push in detached HEAD')
+    if (state.upstream) {
+      await gitExec(repositoryRoot, ['push'], NETWORK_GIT_OPTIONS)
+      return
+    }
+    if (state.remotes.length === 0) throw new GitError('Repository has no remotes')
+    if (state.remotes.length > 1) {
+      throw new GitError('Branch has no upstream and repository has multiple remotes')
+    }
+    await gitExec(
+      repositoryRoot,
+      ['push', '--set-upstream', state.remotes[0], state.currentBranch],
+      NETWORK_GIT_OPTIONS
+    )
   }
 
   private async resolveMutation(

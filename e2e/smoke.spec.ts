@@ -233,6 +233,12 @@ test.describe('Pi-Harness smoke', () => {
     const chatScroller = page.getByTestId('chat-scroller')
     const chatContent = page.getByTestId('chat-content')
     const composerContent = page.getByTestId('composer-content')
+    await page.setViewportSize({ width: 1200, height: 900 })
+    const compactChatWidth = await expect
+      .poll(async () => (await chatContent.boundingBox())?.width ?? 0)
+      .toBeGreaterThan(0)
+      .then(() => chatContent.boundingBox().then((box) => box?.width ?? 0))
+
     await expect
       .poll(async () => {
         const [chatBox, composerBox] = await Promise.all([
@@ -243,6 +249,21 @@ test.describe('Pi-Harness smoke', () => {
         const chatCenter = chatBox.x + chatBox.width / 2
         const composerCenter = composerBox.x + composerBox.width / 2
         return Math.abs(chatCenter - composerCenter)
+      })
+      .toBeLessThanOrEqual(1)
+
+    await page.setViewportSize({ width: 1900, height: 1000 })
+    await expect
+      .poll(async () => (await chatContent.boundingBox())?.width ?? 0)
+      .toBeGreaterThan(compactChatWidth + 100)
+    await expect
+      .poll(async () => {
+        const [chatBox, composerBox] = await Promise.all([
+          chatContent.boundingBox(),
+          composerContent.boundingBox()
+        ])
+        if (!chatBox || !composerBox) return Number.POSITIVE_INFINITY
+        return Math.abs(chatBox.x + chatBox.width / 2 - (composerBox.x + composerBox.width / 2))
       })
       .toBeLessThanOrEqual(1)
 
@@ -361,6 +382,94 @@ test.describe('Pi-Harness smoke', () => {
           encoding: 'utf8'
         }).trim()
       ).toBe('update readme')
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('pushes, pulls, fetches, and switches Git branches', async ({ page }) => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-harness-git-sync-e2e-'))
+    const projectRoot = path.join(tempRoot, 'project')
+    const remoteRoot = path.join(tempRoot, 'remote.git')
+    const peerRoot = path.join(tempRoot, 'peer')
+    try {
+      fs.mkdirSync(projectRoot)
+      execFileSync('git', ['-C', projectRoot, 'init', '-q', '-b', 'main'])
+      execFileSync('git', ['-C', projectRoot, 'config', 'user.name', 'Pi Harness E2E'])
+      execFileSync('git', ['-C', projectRoot, 'config', 'user.email', 'pi-harness-e2e@example.com'])
+      fs.writeFileSync(path.join(projectRoot, 'README.md'), 'initial\n')
+      execFileSync('git', ['-C', projectRoot, 'add', '--', 'README.md'])
+      execFileSync('git', ['-C', projectRoot, 'commit', '-q', '-m', 'initial'])
+      execFileSync('git', ['-C', projectRoot, 'branch', 'feature'])
+      execFileSync('git', ['init', '--bare', '-q', '-b', 'main', remoteRoot])
+      execFileSync('git', ['-C', projectRoot, 'remote', 'add', 'origin', remoteRoot])
+
+      await page.evaluate(async (root) => {
+        await window.piSwitch.workspace.allowRoot(root)
+        localStorage.setItem(
+          'pi-harness.workspace.v1',
+          JSON.stringify({ projectKey: null, pickedCwd: root, tabs: [], activeTabId: null })
+        )
+      }, projectRoot)
+      await page.reload()
+      await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
+
+      const inspector = page.getByTestId('workspace-inspector')
+      await inspector.getByRole('button', { name: /^Git$/ }).click()
+      const branchSelect = inspector.getByTestId('git-branch-select').getByRole('button')
+      await expect(branchSelect).toContainText('main')
+
+      await inspector.getByTestId('git-push').click()
+      await expect(page.getByText(/已推送到上游|Pushed to upstream/)).toBeVisible()
+      expect(
+        execFileSync('git', ['--git-dir', remoteRoot, 'show-ref', '--verify', 'refs/heads/main'], {
+          encoding: 'utf8'
+        })
+      ).toContain('refs/heads/main')
+
+      await branchSelect.click()
+      await page.getByRole('option', { name: 'feature', exact: true }).click()
+      await expect(branchSelect).toContainText('feature')
+      expect(
+        execFileSync('git', ['-C', projectRoot, 'branch', '--show-current'], {
+          encoding: 'utf8'
+        }).trim()
+      ).toBe('feature')
+
+      await branchSelect.click()
+      await page.getByRole('option', { name: 'main', exact: true }).click()
+      await expect(branchSelect).toContainText('main')
+
+      execFileSync('git', ['clone', '-q', remoteRoot, peerRoot])
+      execFileSync('git', ['-C', peerRoot, 'config', 'user.name', 'Pi Harness Peer'])
+      execFileSync('git', ['-C', peerRoot, 'config', 'user.email', 'peer@example.com'])
+      fs.writeFileSync(path.join(peerRoot, 'README.md'), 'remote update\n')
+      execFileSync('git', ['-C', peerRoot, 'add', '--', 'README.md'])
+      execFileSync('git', ['-C', peerRoot, 'commit', '-q', '-m', 'remote update'])
+      execFileSync('git', ['-C', peerRoot, 'push', '-q'])
+
+      await inspector.getByTestId('git-fetch').click()
+      await expect(page.getByText(/远端引用已更新|Remote refs updated/)).toBeVisible()
+      await expect(inspector.getByTestId('git-sync-controls')).toContainText('↓1')
+      await inspector.getByTestId('git-pull').click()
+      await expect(page.getByText(/已从上游拉取|Pulled from upstream/)).toBeVisible()
+      expect(fs.readFileSync(path.join(projectRoot, 'README.md'), 'utf8')).toBe('remote update\n')
+
+      execFileSync('git', ['-C', peerRoot, 'switch', '-q', '-c', 'remote-only'])
+      fs.writeFileSync(path.join(peerRoot, 'remote.txt'), 'remote branch\n')
+      execFileSync('git', ['-C', peerRoot, 'add', '--', 'remote.txt'])
+      execFileSync('git', ['-C', peerRoot, 'commit', '-q', '-m', 'remote branch'])
+      execFileSync('git', ['-C', peerRoot, 'push', '-q', '-u', 'origin', 'remote-only'])
+
+      await inspector.getByTestId('git-fetch').click()
+      await branchSelect.click()
+      await page.getByRole('option', { name: 'origin/remote-only', exact: true }).click()
+      await expect(branchSelect).toContainText('remote-only')
+      expect(
+        execFileSync('git', ['-C', projectRoot, 'rev-parse', '--abbrev-ref', '@{upstream}'], {
+          encoding: 'utf8'
+        }).trim()
+      ).toBe('origin/remote-only')
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true })
     }

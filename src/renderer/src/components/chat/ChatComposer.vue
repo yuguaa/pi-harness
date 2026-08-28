@@ -375,7 +375,10 @@ async function onCompact() {
     @dragleave="onDragLeave"
     @drop.capture="onDrop"
   >
-    <div data-testid="composer-content" class="mx-auto w-full max-w-[72ch]">
+    <div
+      data-testid="composer-content"
+      class="mx-auto w-full max-w-[var(--conversation-max-width)]"
+    >
       <input
         ref="fileInput"
         type="file"

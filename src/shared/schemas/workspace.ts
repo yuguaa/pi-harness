@@ -147,6 +147,16 @@ export const gitCommitSchema = z.object({
     .refine((value) => value.trim().length > 0, 'commit message is required')
 })
 
+export const gitSwitchBranchSchema = z.object({
+  cwd: cwdSchema,
+  branch: z
+    .string()
+    .min(1)
+    .max(1024)
+    .refine((value) => !value.includes('\0'), 'no null bytes'),
+  remote: z.boolean()
+})
+
 export const worktreeListSchema = z.object({
   cwd: cwdSchema
 })

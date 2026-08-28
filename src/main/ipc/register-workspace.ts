@@ -13,6 +13,7 @@ import {
   gitFileMutationSchema,
   gitShowFileSchema,
   gitStatusSchema,
+  gitSwitchBranchSchema,
   promptAgentSchema,
   projectContextMenuSchema,
   sessionContextMenuSchema,
@@ -301,6 +302,35 @@ export function registerWorkspaceIpc(
       await git.commit(parsed.data.cwd, parsed.data.message)
     })
   )
+  ipcMain.handle(IPC_INVOKE.gitBranches, (_e, input: unknown) =>
+    wrap(async () => {
+      const parsed = gitStatusSchema.safeParse(typeof input === 'string' ? { cwd: input } : input)
+      if (!parsed.success) throw new ValidationError('Invalid cwd', { issues: parsed.error.issues })
+      return git.branches(parsed.data.cwd)
+    })
+  )
+  ipcMain.handle(IPC_INVOKE.gitSwitchBranch, (_e, input: unknown) =>
+    wrap(async () => {
+      const parsed = gitSwitchBranchSchema.safeParse(input)
+      if (!parsed.success)
+        throw new ValidationError('Invalid branch switch request', { issues: parsed.error.issues })
+      await git.switchBranch(parsed.data.cwd, parsed.data.branch, parsed.data.remote)
+    })
+  )
+  for (const [channel, action] of [
+    [IPC_INVOKE.gitFetch, (cwd: string) => git.fetch(cwd)],
+    [IPC_INVOKE.gitPull, (cwd: string) => git.pull(cwd)],
+    [IPC_INVOKE.gitPush, (cwd: string) => git.push(cwd)]
+  ] as const) {
+    ipcMain.handle(channel, (_e, input: unknown) =>
+      wrap(async () => {
+        const parsed = gitStatusSchema.safeParse(typeof input === 'string' ? { cwd: input } : input)
+        if (!parsed.success)
+          throw new ValidationError('Invalid cwd', { issues: parsed.error.issues })
+        await action(parsed.data.cwd)
+      })
+    )
+  }
 
   ipcMain.handle(IPC_INVOKE.worktreeList, (_e, input: unknown) =>
     wrap(async () => {

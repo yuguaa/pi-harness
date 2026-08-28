@@ -12,6 +12,7 @@ import type {
   FilePreview,
   FileTreeEntry,
   FileWriteResult,
+  GitBranchState,
   GitFileDiffResponse,
   GitStatusResponse,
   PromptAgentInput,
@@ -762,6 +763,11 @@ export interface PiSwitchAPI {
     stage(cwd: string, filePaths: string[]): Promise<void>
     unstage(cwd: string, filePaths: string[]): Promise<void>
     commit(cwd: string, message: string): Promise<void>
+    branches(cwd: string): Promise<GitBranchState>
+    switchBranch(cwd: string, branch: string, remote: boolean): Promise<void>
+    fetch(cwd: string): Promise<void>
+    pull(cwd: string): Promise<void>
+    push(cwd: string): Promise<void>
   }
   worktrees: {
     list(cwd: string): Promise<WorktreeInfo[]>

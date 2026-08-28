@@ -45,7 +45,9 @@ describe('MessageView', () => {
     })
     await flushPromises()
 
-    expect(wrapper.get('.message-assistant-row').classes()).toContain('max-w-[72ch]')
+    expect(wrapper.get('.message-assistant-row').classes()).toContain(
+      'max-w-[var(--conversation-max-width)]'
+    )
     expect(wrapper.get('h2').text()).toBe('核心能力')
     expect(wrapper.get('strong').text()).toBe('读取代码')
     expect(wrapper.findAll('li').map((item) => item.text())).toEqual(['第一项', '第二项', '已完成'])

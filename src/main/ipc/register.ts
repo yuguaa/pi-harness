@@ -43,6 +43,7 @@ import type { CapabilityService } from '../capabilities/capability-service'
 import { capabilityMutationSchema, capabilityToggleSchema } from '@shared/capabilities/schema'
 import type { EnvironmentManager } from '../environment/environment-manager'
 import { DEFAULT_MASCOT_STYLE, isMascotUnlockAnswer } from '@shared/constants/mascot'
+import { isPetWindowSnapshot, type PetWindowSnapshot } from '@shared/pet/window'
 
 export interface Services {
   settingsStore: JsonStore<AppSettings>
@@ -57,6 +58,7 @@ export interface Services {
   environment: EnvironmentManager
   workspace: WorkspaceServices
   getMainWindow: () => BrowserWindow | null
+  updatePetWindow: (snapshot: PetWindowSnapshot) => void
 }
 
 function wrap<T>(
@@ -505,6 +507,12 @@ export function registerIpc(services: Services): void {
   ipcMain.handle(IPC_INVOKE.windowClose, (e) =>
     wrap(async () => {
       BrowserWindow.fromWebContents(e.sender)?.close()
+    })
+  )
+  ipcMain.handle(IPC_INVOKE.petWindowUpdate, (_e, snapshot: unknown) =>
+    wrap(async () => {
+      if (!isPetWindowSnapshot(snapshot)) throw new ValidationError('Invalid pet window snapshot')
+      services.updatePetWindow(snapshot)
     })
   )
 

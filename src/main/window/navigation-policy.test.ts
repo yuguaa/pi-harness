@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { isAllowedRendererNavigation } from './navigation-policy'
+import { describe, expect, it, vi } from 'vitest'
+import type { WebContents } from 'electron'
+import { installRendererNavigationGuard, isAllowedRendererNavigation } from './navigation-policy'
 
 describe('isAllowedRendererNavigation', () => {
   it('allows only the configured development origin', () => {
@@ -21,5 +22,21 @@ describe('isAllowedRendererNavigation', () => {
 
   it('rejects malformed URLs', () => {
     expect(isAllowedRendererNavigation('not a URL', 'file:///app/index.html')).toBe(false)
+  })
+
+  it('blocks redirects as well as direct navigation', () => {
+    const listeners = new Map<string, (event: { preventDefault(): void }, url: string) => void>()
+    const contents = {
+      on: (name: string, listener: (event: { preventDefault(): void }, url: string) => void) => {
+        listeners.set(name, listener)
+      }
+    } as unknown as WebContents
+    installRendererNavigationGuard(contents, 'http://localhost:5173/', 'test window')
+    const preventDefault = vi.fn()
+
+    listeners.get('will-redirect')?.({ preventDefault }, 'https://outside.example/redirected')
+
+    expect(preventDefault).toHaveBeenCalledOnce()
+    expect(listeners.has('will-navigate')).toBe(true)
   })
 })

@@ -36,7 +36,7 @@ const manifest = computed(() => getPetManifest(props.style))
     :data-style="style"
     :data-active="active ? 'true' : 'false'"
     :data-state="state"
-    class="pointer-events-none absolute bottom-2.5 right-6 z-10 flex w-[112px] select-none flex-col items-center"
+    class="flex w-[112px] select-none flex-col items-center"
     aria-hidden="true"
   >
     <PetStatus

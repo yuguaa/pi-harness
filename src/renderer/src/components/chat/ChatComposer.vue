@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
+import { EditorContent, useEditor } from '@tiptap/vue-3'
+import StarterKit from '@tiptap/starter-kit'
+import Placeholder from '@tiptap/extension-placeholder'
 import Button from '@renderer/components/ui/Button.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
 import Select from '@renderer/components/ui/Select.vue'
@@ -22,7 +25,18 @@ import {
   MAX_ATTACHED_IMAGE_BYTES,
   MAX_ATTACHED_IMAGES
 } from '@shared/workspace/image-attachments'
-import { ImagePlus, Lightbulb, Minimize2, Volume2, VolumeX, Wrench, X } from '@lucide/vue'
+import {
+  ImagePlus,
+  Lightbulb,
+  LoaderCircle,
+  Minimize2,
+  SendHorizontal,
+  Square,
+  Volume2,
+  VolumeX,
+  Wrench,
+  X
+} from '@lucide/vue'
 
 defineProps<{ soundEnabled: boolean }>()
 const emit = defineEmits<{ send: []; abort: []; toggleSound: []; unlockAudio: [] }>()
@@ -34,34 +48,114 @@ const models = useModelsStore()
 const providers = useProvidersStore()
 const settings = useSettingsStore()
 const fileInput = ref<HTMLInputElement | null>(null)
-const textarea = ref<HTMLTextAreaElement | null>(null)
-const textareaFocused = ref(false)
+const editorFocused = ref(false)
 const previewImage = ref<ChatDraftImage | null>(null)
 const previewOpen = ref(false)
 const dragActive = ref(false)
 const pendingImageCount = ref(0)
 let dragDepth = 0
+let syncingEditor = false
+
+function editorContentFromText(text: string) {
+  return {
+    type: 'doc',
+    content: text.split('\n').map((line) => ({
+      type: 'paragraph',
+      ...(line ? { content: [{ type: 'text', text: line }] } : {})
+    }))
+  }
+}
+
+/*
+ * Composer 仍以纯文本与 Agent 交互，Tiptap 只负责文档状态和键盘体验，
+ * 避免引入富文本序列化后改变现有提示语义。
+ */
+const editor = useEditor({
+  extensions: [
+    StarterKit.configure({
+      blockquote: false,
+      bold: false,
+      bulletList: false,
+      code: false,
+      codeBlock: false,
+      heading: false,
+      horizontalRule: false,
+      italic: false,
+      link: false,
+      orderedList: false,
+      strike: false,
+      underline: false
+    }),
+    Placeholder.configure({ placeholder: () => t('workspace.composerPlaceholder') })
+  ],
+  content: editorContentFromText(workspace.draft),
+  editorProps: {
+    attributes: {
+      'aria-label': t('workspace.composerPlaceholder'),
+      'aria-multiline': 'true',
+      class:
+        'tiptap min-h-[84px] max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words px-2.5 py-2 text-[12.5px] leading-relaxed text-[var(--text-primary)] outline-none'
+    }
+  },
+  onUpdate: ({ editor: currentEditor }) => {
+    if (!syncingEditor) workspace.draft = currentEditor.getText({ blockSeparator: '\n' })
+  }
+})
 
 const busy = computed(() => agent.isBusy(sessions.currentId))
 const pendingQueue = computed(() =>
-  agent.pendingQueue.filter((item) => item.sessionId === sessions.currentId)
+  agent.pendingQueue
+    .filter((item) => item.sessionId === sessions.currentId)
+    .map((item) => ({
+      id: item.id,
+      message: item.message,
+      hasImages: item.images.length > 0
+    }))
 )
 const compactAvailable = computed(() => canCompactSession(agent.messages, agent.state, busy.value))
 const canSend = computed(() => Boolean(workspace.draft.trim() || workspace.draftImages.length))
+const executing = computed(() => {
+  const sessionId = sessions.currentId
+  if (!sessionId) return false
+  return Boolean(
+    agent.sending ||
+    agent.runningIds.includes(sessionId) ||
+    agent.streaming.isStreaming ||
+    agent.state?.isStreaming ||
+    agent.state?.isPromptRunning ||
+    agent.state?.isBashRunning
+  )
+})
+const showAbort = computed(() => executing.value && !canSend.value)
 
-function onTextareaFocus() {
-  textareaFocused.value = true
+function onEditorFocus() {
+  editorFocused.value = true
 }
 
-function onTextareaBlur() {
-  textareaFocused.value = false
+function onEditorBlur(event: FocusEvent) {
+  const container = event.currentTarget as HTMLElement | null
+  const nextTarget = event.relatedTarget as Node | null
+  if (!container?.contains(nextTarget)) editorFocused.value = false
+}
+
+function syncEditorFromDraft() {
+  const currentEditor = editor.value
+  if (!currentEditor) return
+  const currentText = currentEditor.getText({ blockSeparator: '\n' })
+  if (currentText === workspace.draft) return
+  syncingEditor = true
+  currentEditor.commands.setContent(editorContentFromText(workspace.draft), { emitUpdate: false })
+  syncingEditor = false
 }
 
 function focus() {
-  textarea.value?.focus({ preventScroll: true })
+  editor.value?.commands.focus()
 }
 
 defineExpose({ focus })
+
+watch([() => workspace.draftKey, () => workspace.draft], syncEditorFromDraft)
+onMounted(syncEditorFromDraft)
 
 const modelOptions = computed(() =>
   models.items
@@ -279,140 +373,169 @@ async function onCompact() {
     @dragenter="onDragEnter"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
-    @drop="onDrop"
+    @drop.capture="onDrop"
   >
-    <input
-      ref="fileInput"
-      type="file"
-      accept="image/*"
-      multiple
-      class="hidden"
-      @change="onFileChange"
-    />
-    <div v-if="workspace.draftImages.length" class="mb-2 flex flex-wrap gap-2">
+    <div data-testid="composer-content" class="mx-auto w-full max-w-[72ch]">
+      <input
+        ref="fileInput"
+        type="file"
+        accept="image/*"
+        multiple
+        class="hidden"
+        @change="onFileChange"
+      />
+      <div v-if="workspace.draftImages.length" class="mb-2 flex flex-wrap gap-2">
+        <div
+          v-for="image in workspace.draftImages"
+          :key="image.id"
+          class="group relative size-14 shrink-0"
+        >
+          <button
+            type="button"
+            class="block size-14 overflow-hidden rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-surface-raised)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+            :title="$t('workspace.previewImage')"
+            @click="openPreview(image)"
+          >
+            <img :src="previewSource(image)" :alt="image.name" class="size-full object-cover" />
+          </button>
+          <button
+            type="button"
+            class="absolute -right-1 -top-1 inline-flex size-4 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--bg-surface-raised)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)] hover:text-[var(--danger)]"
+            :title="$t('workspace.removeImage')"
+            :aria-label="$t('workspace.removeImage')"
+            @click="workspace.removeDraftImage(image.id)"
+          >
+            <X aria-hidden="true" class="size-2.5" :stroke-width="2" />
+          </button>
+        </div>
+      </div>
+      <QueuedMessageList
+        :items="pendingQueue"
+        @edit-start="agent.beginQueuedEdit"
+        @edit-change="agent.updateQueued"
+        @edit-cancel="agent.cancelQueuedEdit"
+        @edit="agent.editQueued"
+        @steer="agent.steerQueued"
+        @remove="agent.removeQueued"
+      />
       <div
-        v-for="image in workspace.draftImages"
-        :key="image.id"
-        class="group relative size-14 shrink-0"
+        class="relative overflow-hidden rounded-[var(--radius-sm)] border bg-[var(--control-bg)] shadow-[var(--control-shadow)] transition-[background-color,border-color] duration-[var(--motion-fast)] ease-[var(--ease-out)] hover:bg-[var(--control-bg-hover)]"
+        :class="
+          editorFocused
+            ? 'border-[var(--accent-border)] bg-[var(--control-bg-hover)]'
+            : 'border-[var(--control-border)]'
+        "
+        :aria-busy="busy"
+        @focusin="onEditorFocus"
+        @focusout="onEditorBlur"
       >
-        <button
-          type="button"
-          class="block size-14 overflow-hidden rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-surface-raised)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-          :title="$t('workspace.previewImage')"
-          @click="openPreview(image)"
+        <EditorContent
+          :editor="editor"
+          data-testid="workspace-composer-editor"
+          @keydown.capture="onKeydown"
+          @paste.capture="onPaste"
+        />
+        <div
+          class="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-[var(--border-subtle)] px-2 py-1.5"
         >
-          <img :src="previewSource(image)" :alt="image.name" class="size-full object-cover" />
-        </button>
-        <button
-          type="button"
-          class="absolute -right-1 -top-1 inline-flex size-4 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--bg-surface-raised)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)] hover:text-[var(--danger)]"
-          :title="$t('workspace.removeImage')"
-          :aria-label="$t('workspace.removeImage')"
-          @click="workspace.removeDraftImage(image.id)"
-        >
-          <X aria-hidden="true" class="size-2.5" :stroke-width="2" />
-        </button>
+          <button
+            type="button"
+            class="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition-[background-color,color,transform] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+            :class="workspace.draftImages.length ? 'text-[var(--accent)]' : ''"
+            :title="$t('workspace.attachImage')"
+            :aria-label="$t('workspace.attachImage')"
+            @click="chooseImages"
+          >
+            <ImagePlus aria-hidden="true" class="size-3.5" :stroke-width="1.8" />
+          </button>
+          <Select
+            v-model="modelValue"
+            data-testid="workspace-model-select"
+            :options="modelOptions"
+            class="min-w-[190px] max-w-[300px]"
+          />
+          <div class="ml-auto flex items-center gap-0.5">
+            <ComposerOptionMenu
+              v-model="thinkingValue"
+              :label="$t('workspace.changeThinking')"
+              :icon="Lightbulb"
+              :options="thinkingOptions"
+              :disabled="busy"
+              :menu-width="300"
+              @interact="emit('unlockAudio')"
+            />
+            <ComposerOptionMenu
+              v-model="toolPreset"
+              :label="$t('workspace.changeTools')"
+              :icon="Wrench"
+              :options="toolOptions"
+              :disabled="busy"
+              :menu-width="300"
+              @interact="emit('unlockAudio')"
+            />
+            <Button
+              v-if="sessions.currentId"
+              variant="ghost"
+              size="sm"
+              :disabled="!compactAvailable"
+              :title="
+                compactAvailable ? $t('workspace.compact') : $t('workspace.compactUnavailable')
+              "
+              @click="onCompact"
+            >
+              <Minimize2 aria-hidden="true" class="size-3.5" />
+              {{ $t('workspace.compact') }}
+            </Button>
+            <button
+              type="button"
+              class="inline-flex size-8 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition-[background-color,color,transform] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] active:scale-95 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+              :title="soundEnabled ? $t('workspace.disableSound') : $t('workspace.enableSound')"
+              :aria-label="
+                soundEnabled ? $t('workspace.disableSound') : $t('workspace.enableSound')
+              "
+              :aria-pressed="soundEnabled"
+              @click="onSoundToggle"
+            >
+              <Volume2 v-if="soundEnabled" aria-hidden="true" class="size-3.5" />
+              <VolumeX v-else aria-hidden="true" class="size-3.5 opacity-60" />
+            </button>
+            <button
+              v-if="showAbort"
+              type="button"
+              data-testid="composer-action-abort"
+              class="inline-flex size-8 items-center justify-center rounded-[8px] text-[var(--error)] transition-[background-color,color,transform] hover:bg-[var(--error-tint)] active:scale-95 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+              :title="$t('workspace.abort')"
+              :aria-label="$t('workspace.abort')"
+              @click="emit('abort')"
+            >
+              <Square aria-hidden="true" class="size-3.5 fill-current" :stroke-width="1.8" />
+            </button>
+            <button
+              v-else
+              type="button"
+              data-testid="composer-action-send"
+              class="inline-flex size-8 items-center justify-center rounded-[8px] bg-[var(--accent)] text-white transition-[background-color,color,transform] hover:bg-[var(--accent-hover)] active:scale-95 focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-45"
+              :disabled="!canSend || agent.sending"
+              :title="$t('workspace.send')"
+              :aria-label="$t('workspace.send')"
+              :aria-busy="agent.sending"
+              @click="emit('send')"
+            >
+              <LoaderCircle
+                v-if="agent.sending"
+                aria-hidden="true"
+                class="size-3.5 animate-spin"
+                :stroke-width="1.8"
+              />
+              <SendHorizontal v-else aria-hidden="true" class="size-3.5" :stroke-width="1.8" />
+            </button>
+          </div>
+        </div>
+        <p class="px-2.5 pb-1 text-[10.5px] text-[var(--text-tertiary)]">
+          {{ $t('workspace.sendHint') }}
+        </p>
       </div>
     </div>
-    <QueuedMessageList
-      :items="pendingQueue"
-      @steer="agent.steerQueued"
-      @remove="agent.removeQueued"
-    />
-    <div
-      class="relative overflow-hidden rounded-[var(--radius-sm)] border bg-[var(--control-bg)] shadow-[var(--control-shadow)] transition-[background-color,border-color] duration-[var(--motion-fast)] ease-[var(--ease-out)] hover:bg-[var(--control-bg-hover)]"
-      :class="
-        textareaFocused
-          ? 'border-[var(--accent-border)] bg-[var(--control-bg-hover)]'
-          : 'border-[var(--control-border)]'
-      "
-      :aria-busy="busy"
-    >
-      <textarea
-        ref="textarea"
-        v-model="workspace.draft"
-        rows="3"
-        :placeholder="$t('workspace.composerPlaceholder')"
-        class="relative z-10 block w-full resize-none bg-transparent px-2.5 py-2 text-[12.5px] text-[var(--text-primary)] outline-none"
-        @focus="onTextareaFocus"
-        @blur="onTextareaBlur"
-        @keydown="onKeydown"
-        @paste="onPaste"
-      />
-    </div>
-    <div class="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-      <button
-        type="button"
-        class="inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        :class="workspace.draftImages.length ? 'text-[var(--accent)]' : ''"
-        :title="$t('workspace.attachImage')"
-        :aria-label="$t('workspace.attachImage')"
-        @click="chooseImages"
-      >
-        <ImagePlus aria-hidden="true" class="size-3.5" :stroke-width="1.8" />
-      </button>
-      <Select
-        v-model="modelValue"
-        data-testid="workspace-model-select"
-        :options="modelOptions"
-        class="min-w-[190px] max-w-[300px]"
-      />
-      <div class="ml-auto flex items-center gap-0.5">
-        <ComposerOptionMenu
-          v-model="thinkingValue"
-          :label="$t('workspace.changeThinking')"
-          :icon="Lightbulb"
-          :options="thinkingOptions"
-          :disabled="busy"
-          :menu-width="300"
-          @interact="emit('unlockAudio')"
-        />
-        <ComposerOptionMenu
-          v-model="toolPreset"
-          :label="$t('workspace.changeTools')"
-          :icon="Wrench"
-          :options="toolOptions"
-          :disabled="busy"
-          :menu-width="300"
-          @interact="emit('unlockAudio')"
-        />
-        <Button
-          v-if="sessions.currentId"
-          variant="ghost"
-          size="sm"
-          :disabled="!compactAvailable"
-          :title="compactAvailable ? $t('workspace.compact') : $t('workspace.compactUnavailable')"
-          @click="onCompact"
-        >
-          <Minimize2 aria-hidden="true" class="size-3.5" />
-          {{ $t('workspace.compact') }}
-        </Button>
-        <button
-          type="button"
-          class="inline-flex size-8 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          :title="soundEnabled ? $t('workspace.disableSound') : $t('workspace.enableSound')"
-          :aria-label="soundEnabled ? $t('workspace.disableSound') : $t('workspace.enableSound')"
-          :aria-pressed="soundEnabled"
-          @click="onSoundToggle"
-        >
-          <Volume2 v-if="soundEnabled" aria-hidden="true" class="size-3.5" />
-          <VolumeX v-else aria-hidden="true" class="size-3.5 opacity-60" />
-        </button>
-        <Button v-if="busy" variant="danger" size="sm" @click="emit('abort')">
-          {{ $t('workspace.abort') }}
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          :disabled="!canSend"
-          :loading="agent.sending"
-          @click="emit('send')"
-        >
-          {{ $t('workspace.send') }}
-        </Button>
-      </div>
-    </div>
-    <p class="mt-1 text-[10.5px] text-[var(--text-tertiary)]">{{ $t('workspace.sendHint') }}</p>
     <div
       v-if="dragActive"
       class="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-[var(--radius-sm)] border border-dashed border-[var(--accent)] bg-[var(--bg-surface-raised)]/90 text-[12px] font-medium text-[var(--accent)]"
@@ -431,3 +554,25 @@ async function onCompact() {
     </Dialog>
   </div>
 </template>
+
+<style scoped>
+:deep(.ProseMirror) {
+  caret-color: var(--accent);
+}
+
+:deep(.ProseMirror p) {
+  margin: 0;
+}
+
+:deep(.ProseMirror p + p) {
+  margin-top: 0.35rem;
+}
+
+:deep(.ProseMirror p.is-editor-empty:first-child::before) {
+  float: left;
+  height: 0;
+  color: var(--control-placeholder);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+</style>

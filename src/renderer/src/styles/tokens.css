@@ -91,7 +91,8 @@
   --tone-streaming-text: var(--text-secondary);
 
   /* ---------- CodeMirror (low-saturation developer palette) ---------- */
-  --editor-active-line: rgba(255, 255, 255, 0.025);
+  --editor-active-line: rgba(var(--accent-rgb), 0.08);
+  --editor-active-line-border: rgba(var(--accent-rgb), 0.22);
   --syntax-property: #87aee9;
   --syntax-string: #78b995;
   --syntax-number: #c99a67;
@@ -101,6 +102,15 @@
   --syntax-heading: #9bb9ec;
   --syntax-emphasis: #b7a4d6;
   --syntax-link: #78adb8;
+
+  /* ---------- Git decoration (File Explorer — low-saturation, matching diff) ---------- */
+  --git-decoration-added: #5abf8a;
+  --git-decoration-modified: #d6a85c;
+  --git-decoration-deleted: #d46a6a;
+  --git-decoration-renamed: #6bb6b6;
+  --git-decoration-untracked: #5abf8a;
+  --git-decoration-copied: #6bb6b6;
+  --git-decoration-ignored: rgba(255, 255, 255, 0.26);
 
   /* ---------- Diff (Configuration Conflict view) — low-saturation Graphite. ---------- */
   --diff-added-bg: rgba(90, 191, 138, 0.1);
@@ -199,7 +209,8 @@
   --tone-streaming-bg: rgba(0, 0, 0, 0.04);
   --tone-streaming-text: var(--text-secondary);
 
-  --editor-active-line: rgba(0, 0, 0, 0.025);
+  --editor-active-line: rgba(var(--accent-rgb), 0.07);
+  --editor-active-line-border: rgba(var(--accent-rgb), 0.2);
   --syntax-property: #3567a8;
   --syntax-string: #28764d;
   --syntax-number: #9a602a;
@@ -209,6 +220,14 @@
   --syntax-heading: #315f9d;
   --syntax-emphasis: #76589e;
   --syntax-link: #2e727d;
+
+  --git-decoration-added: #1f9d63;
+  --git-decoration-modified: #a36a12;
+  --git-decoration-deleted: #c84a4a;
+  --git-decoration-renamed: #147e7e;
+  --git-decoration-untracked: #1f9d63;
+  --git-decoration-copied: #147e7e;
+  --git-decoration-ignored: rgba(0, 0, 0, 0.32);
 
   --diff-added-bg: rgba(31, 157, 99, 0.08);
   --diff-added-text: rgba(20, 120, 75, 0.95);

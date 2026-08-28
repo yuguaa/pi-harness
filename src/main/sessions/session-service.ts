@@ -519,8 +519,11 @@ function entryToUiMessage(entry: SessionEntry): AgentMessage | null {
     case 'branch_summary':
       if (!entry.summary) return null
       return {
-        role: 'user',
-        content: `*The conversation briefly explored another branch and returned with this summary:*\n\n${String(entry.summary)}`
+        role: 'custom',
+        customType: 'branch-summary',
+        content: String(entry.summary),
+        display: true,
+        details: { fromId: entry.fromId }
       }
     case 'custom_message': {
       const content = entry.content

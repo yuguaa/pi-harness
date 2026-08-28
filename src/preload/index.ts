@@ -147,6 +147,9 @@ const api: PiSwitchAPI = {
     maximizeToggle: () => invoke(IPC_INVOKE.windowMaximizeToggle),
     close: () => invoke(IPC_INVOKE.windowClose)
   },
+  pet: {
+    updateWindow: (snapshot) => invoke(IPC_INVOKE.petWindowUpdate, snapshot)
+  },
   workspace: {
     listProjects: () => invoke(IPC_INVOKE.workspaceListProjects),
     pickDirectory: () => invoke(IPC_INVOKE.workspacePickDirectory),
@@ -191,7 +194,10 @@ const api: PiSwitchAPI = {
   git: {
     status: (cwd) => invoke(IPC_INVOKE.gitStatus, cwd),
     diff: (cwd, filePath) => invoke(IPC_INVOKE.gitDiff, { cwd, filePath }),
-    showFile: (cwd, filePath) => invoke(IPC_INVOKE.gitShowFile, { cwd, filePath })
+    showFile: (cwd, filePath) => invoke(IPC_INVOKE.gitShowFile, { cwd, filePath }),
+    stage: (cwd, filePaths) => invoke(IPC_INVOKE.gitStage, { cwd, filePaths }),
+    unstage: (cwd, filePaths) => invoke(IPC_INVOKE.gitUnstage, { cwd, filePaths }),
+    commit: (cwd, message) => invoke(IPC_INVOKE.gitCommit, { cwd, message })
   },
   worktrees: {
     list: (cwd) => invoke(IPC_INVOKE.worktreeList, cwd),

@@ -14,6 +14,7 @@ export const AUTHOR_WATERMARK = 'yuguaa'
 
 /** IPC bridge namespace exposed on window. */
 export const API_NAMESPACE = 'piSwitch'
+export const PET_API_NAMESPACE = 'piHarnessPet'
 
 /** Default window geometry. */
 export const DEFAULT_WINDOW = {

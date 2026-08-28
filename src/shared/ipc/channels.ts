@@ -122,6 +122,7 @@ export const IPC_INVOKE = {
   windowMinimize: invoke('window:minimize'),
   windowMaximizeToggle: invoke('window:maximize-toggle'),
   windowClose: invoke('window:close'),
+  petWindowUpdate: invoke('pet-window:update'),
 
   workspaceListProjects: invoke('workspace:list-projects'),
   workspacePickDirectory: invoke('workspace:pick-directory'),
@@ -153,6 +154,9 @@ export const IPC_INVOKE = {
   gitStatus: invoke('git:status'),
   gitDiff: invoke('git:diff'),
   gitShowFile: invoke('git:show-file'),
+  gitStage: invoke('git:stage'),
+  gitUnstage: invoke('git:unstage'),
+  gitCommit: invoke('git:commit'),
 
   worktreeList: invoke('worktree:list'),
   worktreeCreate: invoke('worktree:create'),
@@ -168,6 +172,7 @@ export const IPC_EVENT = {
   agentEvent: 'pi-harness:agent:event',
   agentRunning: 'pi-harness:agent:running',
   updaterState: 'pi-harness:updater:state',
+  petWindowState: 'pi-harness:pet-window:state',
   capabilityProgress: 'pi-harness:capabilities:mutation-progress'
 } as const
 

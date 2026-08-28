@@ -16,9 +16,11 @@ import { SkillsService } from './services/skills-service'
 import { DiagnosticsService } from './services/diagnostics-service'
 import { registerIpc, broadcastConfigChanged, broadcastNotification } from './ipc/register'
 import { createMainWindow } from './window/create-window'
+import { PetWindowController } from './window/pet-window'
 import type { AppSettings } from '@shared/ipc/api-types'
+import type { PetWindowSnapshot } from '@shared/pet/window'
 import { APP_NAME } from '@shared/constants/index'
-import { DEFAULT_MASCOT_STYLE } from '@shared/constants/mascot'
+import { DEFAULT_MASCOT_STYLE, normalizeMascotStyle } from '@shared/constants/mascot'
 import { FileAccessService } from './files/file-access-service'
 import { FileService } from './files/file-service'
 import { GitService } from './git/git-service'
@@ -102,6 +104,7 @@ async function bootstrap(): Promise<void> {
   await metadata.read()
 
   let mainWindow: BrowserWindow | null = null
+  let petWindow: PetWindowController | null = null
 
   const backup = new BackupService(settingsStore)
   const config = new PiConfigService(settingsStore, backup)
@@ -190,10 +193,29 @@ async function bootstrap(): Promise<void> {
         }
       }
     },
-    getMainWindow: () => mainWindow
+    getMainWindow: () => mainWindow,
+    updatePetWindow: (snapshot) => petWindow?.update(snapshot)
   })
 
-  mainWindow = createMainWindow()
+  const openMainWindow = (): BrowserWindow => {
+    const win = createMainWindow()
+    mainWindow = win
+    petWindow?.destroy()
+    petWindow = new PetWindowController({
+      snapshot: createInitialPetWindowSnapshot(settingsStore.peek()),
+      uiStateStore,
+      getMainWindow: () => mainWindow
+    })
+    win.on('closed', () => {
+      if (mainWindow !== win) return
+      mainWindow = null
+      petWindow?.destroy()
+      petWindow = null
+    })
+    return win
+  }
+
+  openMainWindow()
 
   void packageManager
     .list()
@@ -225,9 +247,7 @@ async function bootstrap(): Promise<void> {
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow()
-    }
+    if (!mainWindow || mainWindow.isDestroyed()) openMainWindow()
   })
 
   app.on('window-all-closed', () => {
@@ -235,6 +255,7 @@ async function bootstrap(): Promise<void> {
   })
 
   app.on('before-quit', () => {
+    petWindow?.destroy()
     stopAutomaticUpdates()
     unsubscribeUpdateState()
     config.stopWatcher()
@@ -242,6 +263,7 @@ async function bootstrap(): Promise<void> {
   })
 
   app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) openMainWindow()
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
@@ -249,4 +271,20 @@ async function bootstrap(): Promise<void> {
   })
 
   log.app.info(`${APP_NAME} ready`)
+}
+
+function createInitialPetWindowSnapshot(settings: AppSettings): PetWindowSnapshot {
+  return {
+    style: normalizeMascotStyle(settings.mascotStyle),
+    state: 'idle',
+    currentTool: null,
+    active: false,
+    enabled: Boolean(settings.mascotUnlocked && settings.petEnabled),
+    animated: settings.petAnimations,
+    showStatus: settings.petStatusText,
+    theme: settings.theme,
+    accentColor: settings.accentColor,
+    customAccentColor: settings.customAccentColor,
+    language: settings.language
+  }
 }

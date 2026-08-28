@@ -69,7 +69,7 @@ async function reapply(change: ConversationFileChange): Promise<void> {
 
 <template>
   <div
-    class="mt-2 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+    class="mx-auto mt-2 w-full max-w-[72ch] rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
   >
     <button
       type="button"

@@ -2,11 +2,12 @@ import path from 'node:path'
 import { gitExec } from './git-exec'
 import type { FileAccessService } from '../files/file-access-service'
 import type { GitFileDiffResponse, GitStatusResponse } from '@shared/types/workspace'
+import { GitError } from '../services/errors'
 import { classifyGitStatus, parseGitPorcelainV1 } from '@shared/workspace/git-status'
 import { TEXT_PREVIEW_MAX_BYTES } from '@shared/workspace/file-types'
 import { isPathWithin } from '@shared/workspace/path-security'
 import { toNativePath } from '@shared/workspace/paths'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 
 function toGitPath(filePath: string): string {
   return filePath.split(path.sep).join('/')
@@ -146,6 +147,82 @@ export class GitService {
       return { content }
     } catch {
       return { content: null }
+    }
+  }
+
+  async stage(cwd: string, filePaths: string[]): Promise<void> {
+    const { repositoryRoot, relativePaths } = await this.resolveMutation(cwd, filePaths)
+    await gitExec(repositoryRoot, ['add', '--', ...relativePaths])
+  }
+
+  async unstage(cwd: string, filePaths: string[]): Promise<void> {
+    const { repositoryRoot, relativePaths } = await this.resolveMutation(cwd, filePaths)
+    try {
+      await gitExec(repositoryRoot, ['restore', '--staged', '--', ...relativePaths])
+    } catch (error) {
+      // 初始分支还没有 HEAD 时，restore --staged 无法解析 HEAD，改用 rm --cached 保留工作区文件。
+      try {
+        await gitExec(repositoryRoot, ['rm', '--cached', '--', ...relativePaths])
+      } catch {
+        throw error
+      }
+    }
+  }
+
+  async commit(cwd: string, message: string): Promise<void> {
+    const realCwd = await this.access.assertAllowed(cwd, { mustExist: true })
+    const repositoryRoot = await this.resolveRepositoryRoot(realCwd)
+    const normalizedMessage = message.trim()
+    if (!normalizedMessage) throw new GitError('Commit message is required')
+    await gitExec(repositoryRoot, ['commit', '-m', normalizedMessage])
+  }
+
+  private async resolveMutation(
+    cwd: string,
+    filePaths: string[]
+  ): Promise<{ repositoryRoot: string; relativePaths: string[] }> {
+    const realCwd = await this.access.assertAllowed(cwd, { mustExist: true })
+    const repositoryRoot = await this.resolveRepositoryRoot(realCwd)
+    const relativePaths = new Set<string>()
+
+    for (const filePath of filePaths) {
+      const allowedPath = await this.access.assertAllowed(filePath)
+      const resolvedPath = await canonicalizeGitPath(allowedPath)
+      if (!isPathWithin(resolvedPath, repositoryRoot)) {
+        throw new GitError('Git path is outside the repository', { filePath })
+      }
+      const relativePath = path.relative(repositoryRoot, resolvedPath)
+      if (!relativePath) throw new GitError('Git path must reference a file', { filePath })
+      relativePaths.add(toGitPath(relativePath))
+    }
+
+    if (!relativePaths.size) throw new GitError('No Git paths provided')
+    return { repositoryRoot, relativePaths: [...relativePaths] }
+  }
+
+  private async resolveRepositoryRoot(cwd: string): Promise<string> {
+    try {
+      const repositoryRoot = toNativePath(
+        (await gitExec(cwd, ['rev-parse', '--show-toplevel'])).trim()
+      )
+      if (repositoryRoot) return repositoryRoot
+    } catch {
+      /* 统一转换为 GitError，避免把子进程错误细节泄漏到调用方。 */
+    }
+    throw new GitError('Not a Git repository', { cwd })
+  }
+}
+
+async function canonicalizeGitPath(filePath: string): Promise<string> {
+  const resolvedPath = path.resolve(filePath)
+  try {
+    return await realpath(resolvedPath)
+  } catch {
+    // 删除中的文件无法 realpath，仍需解析其父目录中的符号链接。
+    try {
+      return path.join(await realpath(path.dirname(resolvedPath)), path.basename(resolvedPath))
+    } catch {
+      return resolvedPath
     }
   }
 }

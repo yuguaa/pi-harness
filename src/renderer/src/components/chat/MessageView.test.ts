@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import MessageView from './MessageView.vue'
-import type { AssistantMessage, ToolResultMessage } from '@shared/types/workspace'
+import type { AssistantMessage, CustomMessage, ToolResultMessage } from '@shared/types/workspace'
 
 describe('MessageView', () => {
   it('renders assistant text as safe Markdown', async () => {
@@ -45,6 +45,7 @@ describe('MessageView', () => {
     })
     await flushPromises()
 
+    expect(wrapper.get('.message-assistant-row').classes()).toContain('max-w-[72ch]')
     expect(wrapper.get('h2').text()).toBe('核心能力')
     expect(wrapper.get('strong').text()).toBe('读取代码')
     expect(wrapper.findAll('li').map((item) => item.text())).toEqual(['第一项', '第二项', '已完成'])
@@ -56,7 +57,7 @@ describe('MessageView', () => {
     expect(wrapper.find('script').exists()).toBe(false)
   })
 
-  it('expands tool results by default and allows collapsing them', async () => {
+  it('keeps successful tool results compact until opened', async () => {
     const message: ToolResultMessage = {
       role: 'toolResult',
       toolCallId: 'tool-1',
@@ -76,15 +77,16 @@ describe('MessageView', () => {
     })
 
     const details = wrapper.get('[data-testid="tool-result-details"]')
-    expect(details.attributes('open')).toBe('')
-    expect(details.get('summary').text()).toBe('工具')
+    expect(details.attributes('open')).toBeUndefined()
+    expect(details.get('summary').text()).toContain('工具')
+    expect(details.get('summary').text()).toContain('write')
     expect(details.get('pre').text()).toBe('<html>generated output</html>')
 
     await details.get('summary').trigger('click')
-    expect((details.element as HTMLDetailsElement).open).toBe(false)
+    expect((details.element as HTMLDetailsElement).open).toBe(true)
   })
 
-  it('expands assistant thinking by default and allows collapsing it', async () => {
+  it('keeps assistant thinking compact until opened', async () => {
     const message: AssistantMessage = {
       role: 'assistant',
       model: 'test-model',
@@ -105,10 +107,51 @@ describe('MessageView', () => {
     })
 
     const details = wrapper.get('[data-testid="thinking-details"]')
-    expect((details.element as HTMLDetailsElement).open).toBe(true)
+    expect((details.element as HTMLDetailsElement).open).toBe(false)
     expect(details.text()).toContain('分析问题')
 
     await details.get('summary').trigger('click')
-    expect((details.element as HTMLDetailsElement).open).toBe(false)
+    expect((details.element as HTMLDetailsElement).open).toBe(true)
+  })
+
+  it('merges adjacent assistant text blocks into one readable document', async () => {
+    const message: AssistantMessage = {
+      role: 'assistant',
+      model: 'test-model',
+      provider: 'test-provider',
+      content: [
+        { type: 'text', text: '第一段' },
+        { type: 'text', text: '第二段' }
+      ]
+    }
+
+    const wrapper = mount(MessageView, {
+      props: { message },
+      global: {
+        mocks: { $t: (key: string) => key },
+        stubs: { BranchNavigator: true, Dialog: true, ToolCallView: true }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.findAll('.markdown-content')).toHaveLength(1)
+    expect(wrapper.text()).toContain('第一段')
+    expect(wrapper.text()).toContain('第二段')
+  })
+
+  it('does not render hidden custom messages', () => {
+    const message: CustomMessage = {
+      role: 'custom',
+      customType: 'internal',
+      content: 'not for display',
+      display: false
+    }
+
+    const wrapper = mount(MessageView, {
+      props: { message },
+      global: { mocks: { $t: (key: string) => key }, stubs: { Dialog: true } }
+    })
+
+    expect(wrapper.find('[data-message-role="custom"]').exists()).toBe(false)
   })
 })

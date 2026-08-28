@@ -2,13 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { EditorView, basicSetup } from 'codemirror'
-import { EditorState, type Extension } from '@codemirror/state'
-import { keymap } from '@codemirror/view'
-import { LanguageDescription } from '@codemirror/language'
-import { languages } from '@codemirror/language-data'
 import { CircleAlert, File, LoaderCircle, Save } from '@lucide/vue'
-import { graphiteEditorTheme, graphiteSyntaxHighlighting } from '@renderer/styles/codemirror'
+import { monaco, syncMonacoTheme, detectMonacoLanguage } from '@renderer/utils/monaco'
 import { useWorkspaceStore } from '@renderer/stores/workspace'
 import { callApi, getApi, getErrorPayload } from '@renderer/composables/useApi'
 import { askConfirm } from '@renderer/composables/useConfirmDialog'
@@ -19,6 +14,7 @@ import EmptyState from '@renderer/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
+const props = defineProps<{ filePath: string | null }>()
 const preview = ref<FilePreview | null>(null)
 const loading = ref(false)
 const saving = ref(false)
@@ -26,11 +22,12 @@ const loadError = ref<string | null>(null)
 const host = ref<HTMLElement | null>(null)
 const objectUrl = ref<string | null>(null)
 const detectedLanguage = ref<string | null>(null)
-let view: EditorView | null = null
+let editor: monaco.editor.IStandaloneCodeEditor | null = null
+let editorModel: monaco.editor.ITextModel | null = null
 let loadVersion = 0
 let editorVersion = 0
 
-const filePath = computed(() => workspace.activeTab?.filePath ?? null)
+const filePath = computed(() => props.filePath)
 const editBuffer = computed(() => {
   const path = filePath.value
   return path ? workspace.fileEditBuffers[path] : undefined
@@ -53,13 +50,6 @@ const displayPath = computed(() => {
     return normalizedPath.slice(normalizedRoot.length + 1)
   }
   return normalizedPath
-})
-
-const fileEditorTheme = EditorView.theme({
-  '.cm-content': { padding: '12px 0', minHeight: '100%' },
-  '.cm-line': { paddingLeft: '14px', paddingRight: '24px' },
-  '.cm-gutters': { paddingTop: '12px' },
-  '.cm-lineNumbers .cm-gutterElement': { minWidth: '44px' }
 })
 
 watch(
@@ -103,63 +93,50 @@ watch(
       objectUrl.value = createObjectUrl(next.base64, next.mime)
     }
 
-    if (next.kind !== 'text') return
-
-    const language = await loadLanguage(next.name)
-    if (version !== editorVersion || preview.value !== next) return
-    detectedLanguage.value = language.label
+    if (next.kind !== 'text' && next.kind !== 'docx') return
+    detectedLanguage.value =
+      next.kind === 'docx' ? t('workspace.filePlainText') : languageLabel(next.name)
 
     await nextTick()
     if (version !== editorVersion || preview.value !== next || !host.value) return
 
-    const canEdit = !next.truncated && Boolean(workspace.fileEditBuffers[next.path])
-    view = new EditorView({
-      parent: host.value,
-      state: EditorState.create({
-        doc: workspace.fileEditBuffers[next.path]?.content ?? next.text ?? '',
-        extensions: [
-          basicSetup,
-          language.extension,
-          graphiteEditorTheme,
-          graphiteSyntaxHighlighting,
-          fileEditorTheme,
-          EditorState.readOnly.of(!canEdit),
-          EditorState.tabSize.of(2),
-          EditorView.editable.of(canEdit),
-          keymap.of([
-            {
-              key: 'Mod-s',
-              preventDefault: true,
-              run: () => {
-                void saveFile()
-                return true
-              }
-            }
-          ]),
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged && canEdit) {
-              workspace.updateFileEditBuffer(next.path, update.state.doc.toString())
-            }
-          }),
-          EditorView.contentAttributes.of({
-            'aria-label': `${next.name} ${canEdit ? t('workspace.fileEditor') : t('workspace.filePreview')}`,
-            spellcheck: 'false'
-          })
-        ]
-      })
+    const canEdit =
+      next.kind === 'text' && !next.truncated && Boolean(workspace.fileEditBuffers[next.path])
+    const language = next.kind === 'docx' ? 'plaintext' : detectMonacoLanguage(next.name)
+    const content = workspace.fileEditBuffers[next.path]?.content ?? next.text ?? ''
+
+    syncMonacoTheme()
+    editorModel = monaco.editor.createModel(content, language)
+    editor = monaco.editor.create(host.value, {
+      model: editorModel,
+      readOnly: !canEdit,
+      fontSize: 12,
+      fontFamily: 'var(--font-mono)',
+      minimap: { enabled: false },
+      automaticLayout: true,
+      scrollBeyondLastLine: false,
+      lineNumbersMinChars: 4,
+      renderLineHighlight: 'all',
+      scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+      ariaLabel: `${next.name} ${canEdit ? t('workspace.fileEditor') : t('workspace.filePreview')}`
+    })
+    editor.onDidChangeModelContent(() => {
+      if (canEdit) {
+        workspace.updateFileEditBuffer(next.path, editor?.getValue() ?? '')
+      }
+    })
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      void saveFile()
     })
   },
   { flush: 'post' }
 )
 
-async function loadLanguage(fileName: string): Promise<{ extension: Extension; label: string }> {
-  const description = LanguageDescription.matchFilename(languages, fileName)
-  if (!description) return { extension: [], label: t('workspace.filePlainText') }
-  try {
-    return { extension: await description.load(), label: description.name }
-  } catch {
-    return { extension: [], label: description.name }
-  }
+/** 返回可读的语言标签（带文件类型图标展示用）。 */
+function languageLabel(fileName: string): string {
+  const language = detectMonacoLanguage(fileName)
+  if (language === 'plaintext') return t('workspace.filePlainText')
+  return language
 }
 
 async function saveFile(overwrite = false) {
@@ -216,8 +193,10 @@ function getErrorMessage(error: unknown): string {
 }
 
 function destroyEditor() {
-  view?.destroy()
-  view = null
+  editor?.dispose()
+  editor = null
+  editorModel?.dispose()
+  editorModel = null
 }
 
 function revokeObjectUrl() {
@@ -255,7 +234,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="flex shrink-0 items-center gap-2 text-[10.5px] text-[var(--text-tertiary)]">
         <span v-if="detectedLanguage" class="uppercase">{{ detectedLanguage }}</span>
-        <span v-if="preview.kind === 'text'">
+        <span v-if="preview.kind === 'text' || preview.kind === 'docx'">
           {{ $t('workspace.fileLines', { count: lineCount }) }}
         </span>
         <span>{{ formatBytes(preview.size) }}</span>
@@ -287,7 +266,7 @@ onBeforeUnmount(() => {
       />
       <EmptyState v-else-if="!preview" :title="$t('workspace.noFile')" :icon="File" />
       <div
-        v-else-if="preview.kind === 'text'"
+        v-else-if="preview.kind === 'text' || preview.kind === 'docx'"
         ref="host"
         data-testid="file-code-view"
         class="h-full min-h-0 overflow-hidden"
@@ -312,11 +291,6 @@ onBeforeUnmount(() => {
         :src="objectUrl"
         class="h-full w-full border-0"
         title="PDF"
-      />
-      <pre
-        v-else-if="preview.kind === 'docx'"
-        class="h-full overflow-auto whitespace-pre-wrap p-5 text-[13px] text-[var(--text-secondary)]"
-        v-text="preview.text"
       />
       <EmptyState v-else :title="$t('workspace.binaryFile')" :icon="File" />
     </div>

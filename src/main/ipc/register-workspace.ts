@@ -8,7 +8,9 @@ import {
   fileReadSchema,
   fileWriteSchema,
   fileUploadSchema,
+  gitCommitSchema,
   gitDiffSchema,
+  gitFileMutationSchema,
   gitShowFileSchema,
   gitStatusSchema,
   promptAgentSchema,
@@ -273,6 +275,30 @@ export function registerWorkspaceIpc(
       if (!parsed.success)
         throw new ValidationError('Invalid show query', { issues: parsed.error.issues })
       return git.showFile(parsed.data.cwd, parsed.data.filePath)
+    })
+  )
+  ipcMain.handle(IPC_INVOKE.gitStage, (_e, input: unknown) =>
+    wrap(async () => {
+      const parsed = gitFileMutationSchema.safeParse(input)
+      if (!parsed.success)
+        throw new ValidationError('Invalid stage request', { issues: parsed.error.issues })
+      await git.stage(parsed.data.cwd, parsed.data.filePaths)
+    })
+  )
+  ipcMain.handle(IPC_INVOKE.gitUnstage, (_e, input: unknown) =>
+    wrap(async () => {
+      const parsed = gitFileMutationSchema.safeParse(input)
+      if (!parsed.success)
+        throw new ValidationError('Invalid unstage request', { issues: parsed.error.issues })
+      await git.unstage(parsed.data.cwd, parsed.data.filePaths)
+    })
+  )
+  ipcMain.handle(IPC_INVOKE.gitCommit, (_e, input: unknown) =>
+    wrap(async () => {
+      const parsed = gitCommitSchema.safeParse(input)
+      if (!parsed.success)
+        throw new ValidationError('Invalid commit request', { issues: parsed.error.issues })
+      await git.commit(parsed.data.cwd, parsed.data.message)
     })
   )
 

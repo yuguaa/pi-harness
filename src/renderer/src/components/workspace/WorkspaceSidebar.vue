@@ -8,6 +8,7 @@ import {
   Folder,
   FolderOpen,
   GitBranch,
+  LoaderCircle,
   Pin,
   Plus,
   RefreshCw,
@@ -411,9 +412,12 @@ defineExpose({ pickProject })
               <span class="min-w-0 flex-1 truncate text-[12px] text-current">
                 {{ session.name || session.firstMessage || session.id }}
               </span>
-              <span
+              <!-- 进行中的对话：旋转 loading 图标 -->
+              <LoaderCircle
                 v-if="running(session.id)"
-                class="size-1.5 shrink-0 rounded-full bg-[var(--success)]"
+                class="size-3.5 shrink-0 animate-spin text-[var(--accent)]"
+                :stroke-width="2"
+                :aria-label="$t('workspace.running')"
                 :title="$t('workspace.running')"
               />
             </button>

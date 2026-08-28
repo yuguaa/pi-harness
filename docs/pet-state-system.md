@@ -13,7 +13,7 @@ Pet Store
        ↓ runtime state + temporary state
 Pet Renderer
        ↓ manifest / sprite / fallback
-Mascot UI
+Desktop Pet Window / Mascot UI
 ```
 
 ## 预置主题
@@ -105,6 +105,8 @@ success → jumping
 应用设置包含：显示宠物、主题、动画、状态文字、自动休眠、休眠分钟数（1–120）、完成提示音。提示音默认关闭，主题默认 `none`，因此升级后不会强制显示装饰内容。
 
 未打包的开发环境可启用 Developer Mode 查看 Pet Debug Preview。预览支持手动切换全部 13 状态，并显示 Current、Previous、Temporary、Resolved、Current Tool 和完整 Resolver Context；它不修改真实 Runtime。
+
+工作区前景宠物运行在独立透明桌面窗口中，原应用只保留状态权威与页面背景展示。桌面窗口通过原生拖动区域跨应用、跨显示器移动，位置仅持久化到 Pi-Harness UI State，不写入 Pi 原生配置，也不反向修改 Runtime 状态。
 
 ## 关键文件
 

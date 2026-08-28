@@ -77,6 +77,7 @@ export const useAgentStore = defineStore('agent', () => {
   const transientSessionIds = new Set<string>()
   const failedPromptIds = new Set<string>()
   const queueActionIds = new Set<string>()
+  const editingQueueIds = new Set<string>()
   const settlingIds = reactive(new Set<string>())
   const settlementTails = new Map<string, Promise<void>>()
   let unsubEvent: (() => void) | null = null
@@ -432,7 +433,9 @@ export const useAgentStore = defineStore('agent', () => {
     const index = pendingQueue.value.findIndex((item) => item.sessionId === sessionId)
     if (index === -1) return
     const next = pendingQueue.value[index]
+    if (editingQueueIds.has(next.id)) return
     pendingQueue.value = pendingQueue.value.filter((_, itemIndex) => itemIndex !== index)
+    editingQueueIds.delete(next.id)
     const result = await dispatch(
       sessionId,
       next.cwd,
@@ -453,6 +456,7 @@ export const useAgentStore = defineStore('agent', () => {
     const targetId = item.sessionId
     queueActionIds.add(targetId)
     pendingQueue.value = pendingQueue.value.filter((entry) => entry.id !== queueId)
+    editingQueueIds.delete(queueId)
     try {
       const snapshot = await callApi(() => getApi().agent.state(targetId))
       const runtimeBusy = Boolean(
@@ -489,6 +493,40 @@ export const useAgentStore = defineStore('agent', () => {
 
   function removeQueued(queueId: string): void {
     pendingQueue.value = pendingQueue.value.filter((entry) => entry.id !== queueId)
+    editingQueueIds.delete(queueId)
+  }
+
+  function beginQueuedEdit(queueId: string): boolean {
+    if (!pendingQueue.value.some((entry) => entry.id === queueId)) return false
+    editingQueueIds.add(queueId)
+    return true
+  }
+
+  function updateQueued(queueId: string, message: string): boolean {
+    if (!pendingQueue.value.some((entry) => entry.id === queueId)) return false
+    pendingQueue.value = pendingQueue.value.map((entry) =>
+      entry.id === queueId ? { ...entry, message } : entry
+    )
+    return true
+  }
+
+  function cancelQueuedEdit(queueId: string, message: string): boolean {
+    const updated = updateQueued(queueId, message)
+    editingQueueIds.delete(queueId)
+    const item = pendingQueue.value.find((entry) => entry.id === queueId)
+    if (item?.sessionId && !isSessionOccupied(item.sessionId)) void drainQueue(item.sessionId)
+    return updated
+  }
+
+  function editQueued(queueId: string, message: string): boolean {
+    const item = pendingQueue.value.find((entry) => entry.id === queueId)
+    if (!item) return false
+    const nextMessage = message.trim()
+    if (!nextMessage && !item.images.length) return false
+    updateQueued(queueId, nextMessage)
+    editingQueueIds.delete(queueId)
+    if (item.sessionId && !isSessionOccupied(item.sessionId)) void drainQueue(item.sessionId)
+    return true
   }
 
   function insertQueued(index: number, item: QueuedMessage): void {
@@ -672,6 +710,10 @@ export const useAgentStore = defineStore('agent', () => {
     reconcile,
     isBusy,
     send,
+    beginQueuedEdit,
+    updateQueued,
+    cancelQueuedEdit,
+    editQueued,
     steerQueued,
     removeQueued,
     abort,

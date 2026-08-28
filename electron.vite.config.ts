@@ -25,7 +25,10 @@ export default defineConfig({
   preload: {
     build: {
       rollupOptions: {
-        input: { index: resolve(import.meta.dirname, 'src/preload/index.ts') }
+        input: {
+          index: resolve(import.meta.dirname, 'src/preload/index.ts'),
+          pet: resolve(import.meta.dirname, 'src/preload/pet.ts')
+        }
       }
     },
     resolve: {

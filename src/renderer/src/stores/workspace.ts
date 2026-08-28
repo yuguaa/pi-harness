@@ -49,8 +49,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const filesLoading = ref(false)
   const gitLoading = ref(false)
   const sidebarWidth = ref(260)
-  const inspectorTab = ref<'files' | 'git' | 'diff'>('files')
+  const inspectorTab = ref<'files' | 'git'>('files')
+  const inspectorPreview = ref<'file' | 'diff' | null>(null)
   const inspectorDiffPath = ref<string | null>(null)
+  const inspectorFilePath = ref<string | null>(null)
   const pickedCwd = ref<string | null>(null)
   const projectRoots = ref<string[]>([])
   const pinnedProjectKeys = ref<string[]>([])
@@ -193,12 +195,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return true
   }
 
-  function openFileTab(filePath: string, title: string) {
-    const id = `file:${filePath}`
-    if (!tabs.value.some((t) => t.id === id)) {
-      tabs.value = [...tabs.value, { id, kind: 'file', title, filePath, closable: true }]
-    }
-    activeTabId.value = id
+  function showInspectorFile(filePath: string): void {
+    inspectorFilePath.value = filePath
+    inspectorDiffPath.value = null
+    inspectorPreview.value = 'file'
+    inspectorTab.value = 'files'
   }
 
   function closeTab(id: string) {
@@ -361,7 +362,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (opts.restoreTabs && snap.tabs?.length) {
       const archived = new Set(archivedSessionIds.value)
       tabs.value = snap.tabs.filter(
-        (tab) => tab.kind !== 'chat' || !tab.sessionId || !archived.has(tab.sessionId)
+        (tab) => tab.kind === 'chat' && (!tab.sessionId || !archived.has(tab.sessionId))
       )
       activeTabId.value = snap.activeTabId
       pruneOrphanedProjectTabs()
@@ -459,19 +460,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const remainingRoots = projects.value
       .filter((project) => project.projectKey !== projectKey)
       .map((project) => project.projectRoot)
-    return [
-      ...new Set(
-        tabs.value
-          .filter(
-            (tab) =>
-              tab.kind === 'file' &&
-              tab.filePath &&
-              !isPathWithinProjectRoots(tab.filePath, remainingRoots) &&
-              isFileDirty(tab.filePath)
-          )
-          .map((tab) => tab.filePath!)
-      )
-    ]
+    return dirtyFilePaths.value.filter(
+      (filePath) => !isPathWithinProjectRoots(filePath, remainingRoots)
+    )
   }
 
   function pruneOrphanedProjectTabs() {
@@ -480,6 +471,22 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const availableRoots = availableProjects.map((project) => project.projectRoot)
     const removedTabIds = new Set<string>()
     const removedFilePaths = new Set<string>()
+
+    for (const filePath of Object.keys(fileEditBuffers.value)) {
+      if (!isPathWithinProjectRoots(filePath, availableRoots)) removedFilePaths.add(filePath)
+    }
+
+    if (
+      (inspectorFilePath.value &&
+        !isPathWithinProjectRoots(inspectorFilePath.value, availableRoots)) ||
+      (inspectorDiffPath.value &&
+        !isPathWithinProjectRoots(inspectorDiffPath.value, availableRoots))
+    ) {
+      inspectorFilePath.value = null
+      inspectorDiffPath.value = null
+      inspectorPreview.value = null
+      inspectorTab.value = 'files'
+    }
 
     for (const tab of tabs.value) {
       if (tab.kind === 'file' || tab.kind === 'diff') {
@@ -504,7 +511,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
     }
 
-    if (!removedTabIds.size) return
+    if (!removedTabIds.size && !removedFilePaths.size) return
     removedFilePaths.forEach(discardFileEditBuffer)
     removeTabsById(removedTabIds)
   }
@@ -565,7 +572,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   function showInspectorDiff(filePath: string): void {
     inspectorDiffPath.value = filePath
-    inspectorTab.value = 'diff'
+    inspectorFilePath.value = null
+    inspectorPreview.value = 'diff'
+    inspectorTab.value = 'git'
   }
 
   function clearDraft(sessionId: string) {
@@ -594,7 +603,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     gitLoading,
     sidebarWidth,
     inspectorTab,
+    inspectorPreview,
     inspectorDiffPath,
+    inspectorFilePath,
     currentCwd,
     canChat,
     pickedCwd,
@@ -618,7 +629,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     dirtyFilePathsAfterProjectRemoval,
     restore,
     ensureChatTab,
-    openFileTab,
     closeTab,
     closeOtherTabs,
     closeTabsToRight,
@@ -629,6 +639,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loadGit,
     refreshContent,
     showInspectorDiff,
+    showInspectorFile,
     addDraftImages,
     removeDraftImage,
     clearDraft,

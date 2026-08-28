@@ -6,12 +6,14 @@ declare module '*.vue' {
   export default component
 }
 
-import type { PiSwitchAPI } from '@shared/ipc/api-types'
+import type { PetWindowAPI, PiSwitchAPI } from '@shared/ipc/api-types'
 
 declare global {
   interface Window {
     /** Typed IPC bridge exposed by Electron preload. Required for the desktop app. */
     piSwitch?: PiSwitchAPI
+    /** Minimal read-only bridge exposed only by the detached pet window. */
+    piHarnessPet?: PetWindowAPI
   }
 }
 

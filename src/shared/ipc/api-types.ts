@@ -26,6 +26,7 @@ import type {
 } from '../types/workspace'
 import type { ToolPreset } from '../workspace/tool-presets'
 import type { MascotStyle } from '../constants/mascot'
+import type { PetState } from '../pet/types'
 import type {
   CapabilityActionResult,
   CapabilityDescriptor,
@@ -495,6 +496,24 @@ export interface AppSettings {
   autoOpenLastProject: boolean
 }
 
+export interface PetWindowSnapshot {
+  style: MascotStyle
+  state: PetState
+  currentTool: string | null
+  active: boolean
+  enabled: boolean
+  animated: boolean
+  showStatus: boolean
+  theme: AppSettings['theme']
+  accentColor: AppSettings['accentColor']
+  customAccentColor: string
+  language: AppSettings['language']
+}
+
+export interface PetWindowAPI {
+  onState(listener: (payload: PetWindowSnapshot) => void): () => void
+}
+
 export interface NotificationEvent {
   level: 'info' | 'success' | 'warning' | 'error'
   title: string
@@ -681,6 +700,9 @@ export interface PiSwitchAPI {
     maximizeToggle(): Promise<void>
     close(): Promise<void>
   }
+  pet: {
+    updateWindow(snapshot: PetWindowSnapshot): Promise<void>
+  }
   workspace: {
     listProjects(): Promise<SessionProjectGroup[]>
     pickDirectory(): Promise<string | null>
@@ -737,6 +759,9 @@ export interface PiSwitchAPI {
     status(cwd: string): Promise<GitStatusResponse>
     diff(cwd: string, filePath: string): Promise<GitFileDiffResponse>
     showFile(cwd: string, filePath: string): Promise<{ content: string | null }>
+    stage(cwd: string, filePaths: string[]): Promise<void>
+    unstage(cwd: string, filePaths: string[]): Promise<void>
+    commit(cwd: string, message: string): Promise<void>
   }
   worktrees: {
     list(cwd: string): Promise<WorktreeInfo[]>

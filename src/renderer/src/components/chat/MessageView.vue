@@ -3,10 +3,12 @@ import { Markdown } from '@comark/vue'
 import security from '@comark/vue/plugins/security'
 import taskList from '@comark/vue/plugins/task-list'
 import { computed, ref } from 'vue'
-import type { AgentMessage, ImageContent } from '@shared/types/workspace'
+import type { AgentMessage, AssistantMessage, ImageContent } from '@shared/types/workspace'
 import ToolCallView from './ToolCallView.vue'
 import BranchNavigator from './BranchNavigator.vue'
 import Dialog from '@renderer/components/ui/Dialog.vue'
+import Badge from '@renderer/components/ui/Badge.vue'
+import { i18n } from '@renderer/i18n'
 
 const markdownOptions = {
   registerDefaultPlugins: false
@@ -48,11 +50,15 @@ const markdownPlugins = [
   })
 ]
 
-const props = defineProps<{
-  message: AgentMessage
-  entryId?: string
-  streaming?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    message: AgentMessage
+    entryId?: string
+    streaming?: boolean
+    showMeta?: boolean
+  }>(),
+  { entryId: undefined, showMeta: true, streaming: false }
+)
 const previewSrc = ref<string | null>(null)
 const previewOpen = ref(false)
 
@@ -104,6 +110,20 @@ const userImages = computed(() => {
   })
 })
 
+const assistantBlocks = computed(() => {
+  if (props.message.role !== 'assistant') return []
+  const blocks: AssistantMessage['content'] = []
+  for (const block of props.message.content) {
+    const previous = blocks.at(-1)
+    if (block.type === 'text' && previous?.type === 'text') {
+      blocks[blocks.length - 1] = { ...previous, text: `${previous.text}\n\n${block.text}` }
+    } else {
+      blocks.push(block)
+    }
+  }
+  return blocks
+})
+
 const toolResultText = computed(() => {
   const msg = props.message
   if (msg.role !== 'toolResult') return ''
@@ -123,116 +143,241 @@ const bashText = computed(() => {
   if (msg.role !== 'bashExecution') return ''
   return `$ ${msg.command}\n${msg.output}`
 })
+
+const thinkingBadgeTone = computed<'reasoning' | 'streaming' | 'muted'>(() => {
+  const msg = props.message
+  if (msg.role !== 'assistant') return 'muted'
+  const thinking = msg.content.find((block) => block.type === 'thinking')
+  if (!thinking || thinking.type !== 'thinking') return 'muted'
+  if (thinking.deferred) return 'muted'
+  return props.streaming ? 'streaming' : 'reasoning'
+})
+
+const thinkingBadgeText = computed(() => {
+  const msg = props.message
+  if (msg.role !== 'assistant') return ''
+  const thinking = msg.content.find((block) => block.type === 'thinking')
+  if (!thinking || thinking.type !== 'thinking') return ''
+  if (thinking.deferred) return i18n.global.t('workspace.thinkingOmitted')
+  if (props.streaming) return i18n.global.t('workspace.streaming')
+  return i18n.global.t('workspace.completed')
+})
+
+const toolResultLabel = computed(() => {
+  const msg = props.message
+  return msg.role === 'toolResult' ? msg.toolName || '' : ''
+})
+
+const bashCommand = computed(() => {
+  const msg = props.message
+  return msg.role === 'bashExecution' ? msg.command : ''
+})
+
+const bashFailed = computed(() => {
+  const msg = props.message
+  return (
+    msg.role === 'bashExecution' &&
+    ((msg.exitCode !== undefined && msg.exitCode !== 0) || msg.cancelled)
+  )
+})
+
+const bashStatus = computed(() => {
+  const msg = props.message
+  if (msg.role !== 'bashExecution') return ''
+  if (msg.cancelled) return i18n.global.t('workspace.cancelled')
+  if (msg.exitCode !== undefined && msg.exitCode !== 0) return `exit ${msg.exitCode}`
+  if (msg.truncated) return i18n.global.t('workspace.outputTruncated')
+  return i18n.global.t('workspace.completed')
+})
+
+const bashStatusClass = computed(() => {
+  const msg = props.message
+  if (msg.role !== 'bashExecution') return 'work-trace-status--success'
+  if (bashFailed.value) return 'work-trace-status--error'
+  return msg.truncated ? 'work-trace-status--warning' : 'work-trace-status--success'
+})
+
+const customText = computed(() => {
+  const msg = props.message
+  if (msg.role !== 'custom') return ''
+  if (typeof msg.content === 'string') return msg.content
+  return msg.content
+    .filter((block) => block.type === 'text')
+    .map((block) => (block.type === 'text' ? block.text : ''))
+    .join('\n')
+})
+
+const customLabel = computed(() => {
+  const msg = props.message
+  if (msg.role !== 'custom') return ''
+  if (msg.customType === 'compaction') return i18n.global.t('workspace.compaction')
+  if (msg.customType === 'branch-summary') return i18n.global.t('workspace.branchSummary')
+  return msg.customType
+})
 </script>
 
 <template>
   <article
-    class="mb-3 flex flex-col"
-    :class="message.role === 'user' ? 'items-end' : 'items-start'"
+    v-if="message.role !== 'custom' || message.display"
+    class="message-entry mx-auto flex w-full max-w-[72ch] flex-col py-4"
+    :data-message-role="message.role"
+    :class="[
+      message.role === 'user' ? 'items-end' : 'items-start',
+      /* 用户消息是新轮次开始，助手活动保持连续的消息流节奏。 */
+      message.role === 'user' ? 'pt-6' : ''
+    ]"
   >
-    <p
-      v-if="message.role !== 'toolResult' && message.role !== 'user'"
-      class="mb-1 text-[10.5px] font-medium uppercase tracking-[0.05em] text-[var(--text-tertiary)]"
-    >
-      <template v-if="message.role === 'assistant'">
-        {{ $t('workspace.roleAssistant') }}
-        <span v-if="streaming"> · {{ $t('workspace.streaming') }}</span>
-      </template>
-      <template v-else-if="message.role === 'bashExecution'">bash</template>
-      <template v-else>{{ message.customType }}</template>
-    </p>
-
-    <div
-      v-if="message.role === 'user'"
-      class="max-w-[85%] rounded-[var(--radius-md)] rounded-tr-[var(--radius-xs)] bg-[var(--accent-tint)] px-3 py-2 text-[13px] text-[var(--text-primary)]"
-    >
-      <p v-if="userText" class="whitespace-pre-wrap">{{ userText }}</p>
-      <div v-if="userImages.length" class="flex flex-wrap gap-2" :class="userText ? 'mt-2' : ''">
-        <button
-          v-for="(src, index) in userImages"
-          :key="index"
-          type="button"
-          class="block size-[72px] overflow-hidden rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-surface-raised)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-          :title="$t('workspace.previewImage')"
-          @click="openPreview(src)"
-        >
-          <img :src="src" alt="" loading="lazy" class="size-full object-cover" />
-        </button>
+    <template v-if="message.role === 'user'">
+      <div
+        class="message-bubble message-bubble--user max-w-[80%] rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-surface-raised)] px-4 py-3 text-[13px] text-[var(--text-primary)]"
+      >
+        <p v-if="userText" class="whitespace-pre-wrap">{{ userText }}</p>
+        <div v-if="userImages.length" class="flex flex-wrap gap-2" :class="userText ? 'mt-2' : ''">
+          <button
+            v-for="(src, index) in userImages"
+            :key="index"
+            type="button"
+            class="block size-[72px] overflow-hidden rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-surface-raised)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+            :title="$t('workspace.previewImage')"
+            @click="openPreview(src)"
+          >
+            <img :src="src" alt="" loading="lazy" class="size-full object-cover" />
+          </button>
+        </div>
       </div>
-    </div>
+    </template>
 
-    <div v-else-if="message.role === 'assistant'" class="w-full space-y-2">
-      <template v-for="(block, i) in message.content" :key="i">
-        <Suspense v-if="block.type === 'text'">
-          <Markdown
-            :value="block.text"
-            :options="markdownOptions"
-            :plugins="markdownPlugins"
-            :streaming="streaming"
-            class="markdown-content"
-          />
-          <template #fallback>
-            <p class="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--text-primary)]">
-              {{ block.text }}
-            </p>
+    <template v-else-if="message.role === 'assistant'">
+      <div class="message-assistant-row w-full max-w-[72ch]">
+        <div v-if="showMeta && streaming" class="message-meta message-meta--assistant">
+          <span class="message-streaming">· {{ $t('workspace.streaming') }}</span>
+        </div>
+        <div class="message-body--assistant space-y-2">
+          <template v-for="(block, i) in assistantBlocks" :key="i">
+            <Suspense v-if="block.type === 'text'">
+              <Markdown
+                :value="block.text"
+                :options="markdownOptions"
+                :plugins="markdownPlugins"
+                :streaming="streaming"
+                class="markdown-content"
+              />
+              <template #fallback>
+                <p
+                  class="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--text-primary)]"
+                >
+                  {{ block.text }}
+                </p>
+              </template>
+            </Suspense>
+            <details
+              v-else-if="block.type === 'thinking'"
+              data-testid="thinking-details"
+              class="work-trace"
+            >
+              <summary class="work-trace-summary">
+                <span class="work-trace-icon" aria-hidden="true">✦</span>
+                <span class="work-trace-label">{{ $t('workspace.thinking') }}</span>
+                <div class="work-trace-badge">
+                  <Badge :tone="thinkingBadgeTone">{{ thinkingBadgeText }}</Badge>
+                </div>
+                <span class="work-trace-chevron" aria-hidden="true">⌄</span>
+              </summary>
+              <p
+                class="work-trace-content whitespace-pre-wrap text-[13px] text-[var(--text-secondary)]"
+              >
+                {{ block.thinking || (block.deferred ? $t('workspace.thinkingDeferred') : '') }}
+              </p>
+            </details>
+            <ToolCallView v-else-if="block.type === 'toolCall'" :block="block" />
+            <button
+              v-else-if="block.type === 'image' && imageSource(block)"
+              type="button"
+              class="block max-w-[320px] overflow-hidden rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
+              :title="$t('workspace.previewImage')"
+              @click="openImage(block)"
+            >
+              <img
+                :src="imageSource(block) ?? ''"
+                alt=""
+                loading="lazy"
+                class="max-h-[280px] w-full object-contain"
+              />
+            </button>
           </template>
-        </Suspense>
-        <details
-          v-else-if="block.type === 'thinking'"
-          open
-          data-testid="thinking-details"
-          class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2 py-1"
-        >
-          <summary class="cursor-pointer text-[11px] text-[var(--text-tertiary)]">
-            {{ $t('workspace.thinking') }}
-          </summary>
-          <p class="mt-1 whitespace-pre-wrap text-[12px] text-[var(--text-secondary)]">
-            {{ block.thinking || (block.deferred ? $t('workspace.thinkingDeferred') : '') }}
-          </p>
-        </details>
-        <ToolCallView v-else-if="block.type === 'toolCall'" :block="block" />
-        <button
-          v-else-if="block.type === 'image' && imageSource(block)"
-          type="button"
-          class="block max-w-[320px] overflow-hidden rounded-[var(--radius-sm)] border border-[var(--border-default)] bg-[var(--bg-surface)] focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]"
-          :title="$t('workspace.previewImage')"
-          @click="openImage(block)"
-        >
-          <img
-            :src="imageSource(block) ?? ''"
-            alt=""
-            loading="lazy"
-            class="max-h-[280px] w-full object-contain"
-          />
-        </button>
-      </template>
-    </div>
+        </div>
+      </div>
+    </template>
 
     <details
       v-else-if="message.role === 'toolResult'"
-      open
       data-testid="tool-result-details"
-      class="w-full rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+      class="work-trace message-body message-body--tool w-full max-w-[72ch]"
+      :open="message.isError || undefined"
     >
-      <summary
-        class="cursor-pointer px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.05em] text-[var(--text-tertiary)] select-none"
-      >
-        {{ $t('workspace.roleTool') }}
+      <summary class="work-trace-summary">
+        <span
+          class="work-trace-icon"
+          :class="{ 'work-trace-icon--error': message.isError }"
+          aria-hidden="true"
+          data-glyph="↳"
+        />
+        <span class="work-trace-label">{{ $t('workspace.roleTool') }}</span>
+        <span v-if="toolResultLabel" class="work-trace-preview">{{ toolResultLabel }}</span>
+        <div class="work-trace-badge">
+          <Badge :tone="message.isError ? 'error' : 'success'">
+            {{ message.isError ? $t('common.failed') : $t('workspace.completed') }}
+          </Badge>
+        </div>
+        <span class="work-trace-chevron" aria-hidden="true">⌄</span>
       </summary>
       <pre
-        class="max-h-[32rem] overflow-auto whitespace-pre-wrap border-t border-[var(--border-subtle)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px]"
+        class="work-trace-content max-h-[32rem] overflow-auto whitespace-pre-wrap font-[family-name:var(--font-mono)] text-[13px]"
         :class="message.isError ? 'text-[var(--danger)]' : 'text-[var(--text-secondary)]'"
         v-text="toolResultText"
       />
     </details>
 
-    <pre
+    <details
       v-else-if="message.role === 'bashExecution'"
-      class="w-full overflow-x-auto whitespace-pre-wrap rounded-[var(--radius-sm)] bg-[var(--bg-surface)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--text-secondary)]"
-      v-text="bashText"
-    />
+      class="work-trace message-body message-body--tool w-full max-w-[72ch]"
+    >
+      <summary class="work-trace-summary">
+        <span
+          class="work-trace-icon"
+          :class="{ 'work-trace-icon--error': bashFailed }"
+          aria-hidden="true"
+          data-glyph="$"
+        />
+        <span class="work-trace-label">bash</span>
+        <span class="work-trace-preview">{{ bashCommand }}</span>
+        <span class="work-trace-status work-trace-badge" :class="bashStatusClass">
+          {{ bashStatus }}
+        </span>
+        <span class="work-trace-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <pre
+        class="work-trace-content max-h-[32rem] overflow-auto whitespace-pre-wrap font-[family-name:var(--font-mono)] text-[13px]"
+        :class="bashFailed ? 'text-[var(--danger)]' : 'text-[var(--text-secondary)]'"
+        v-text="bashText"
+      />
+    </details>
 
-    <p v-else class="whitespace-pre-wrap text-[13px] text-[var(--text-secondary)]">
+    <div
+      v-else-if="message.role === 'custom' && message.display"
+      class="message-system message-body message-body--tool w-full max-w-[72ch]"
+    >
+      <div class="message-system-label">
+        <span class="message-role-mark message-role-mark--system" aria-hidden="true">•</span>
+        <span>{{ customLabel }}</span>
+      </div>
+      <p class="message-system-text whitespace-pre-wrap">{{ customText }}</p>
+    </div>
+
+    <p
+      v-else
+      class="message-body message-body--tool max-w-[72ch] whitespace-pre-wrap text-[13px] text-[var(--text-secondary)]"
+    >
       {{ typeof message.content === 'string' ? message.content : '' }}
     </p>
 
@@ -245,6 +390,200 @@ const bashText = computed(() => {
 </template>
 
 <style scoped>
+.message-entry {
+  --message-gap: 6px;
+  min-width: 0;
+}
+
+.message-meta {
+  display: flex;
+  width: 100%;
+  max-width: 72ch;
+  align-items: center;
+  gap: var(--message-gap);
+  margin-bottom: 5px;
+  margin-inline: auto;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+}
+
+.message-meta--assistant {
+  margin-inline: 0;
+}
+
+.message-role-mark {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.message-role-mark--system {
+  background: var(--bg-surface);
+  color: var(--text-tertiary);
+}
+
+.message-bubble--user {
+  box-shadow: none;
+}
+
+.message-body--assistant {
+  margin-inline: auto;
+}
+
+.message-body--tool {
+  margin-inline: auto;
+}
+
+.message-streaming {
+  color: var(--accent);
+}
+
+.work-trace {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-raised);
+}
+
+.work-trace summary {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-secondary);
+}
+
+.work-trace summary::-webkit-details-marker {
+  display: none;
+}
+
+.work-trace summary:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.work-trace-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: var(--bg-surface-raised);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.work-trace-icon::before {
+  content: attr(data-glyph);
+}
+
+.work-trace-icon--error {
+  background: var(--error-tint);
+  color: var(--error);
+}
+
+.work-trace-label {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.work-trace-preview {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-trace-status {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.work-trace-status--success {
+  color: var(--success);
+}
+
+.work-trace-status--error {
+  color: var(--error);
+}
+
+.work-trace-status--warning {
+  color: var(--warning);
+}
+
+.work-trace-badge {
+  margin-left: auto;
+}
+
+.work-trace-chevron {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 150ms var(--ease-out);
+}
+
+.work-trace[open] .work-trace-chevron {
+  transform: rotate(180deg);
+}
+
+.work-trace-content {
+  margin: 0;
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px;
+}
+
+.message-system {
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+}
+
+.message-system-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.message-system-text {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-trace-chevron {
+    transition: none;
+  }
+}
+
 .markdown-content {
   min-width: 0;
   overflow-wrap: anywhere;

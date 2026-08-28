@@ -276,67 +276,77 @@ describe('agent store new-session handshake', () => {
     expect(agent.completionCount).toBe(1)
   })
 
-  it('settles file changes even when the user switches sessions before completion', async () => {
-    let onAgentEvent: ((payload: unknown) => void) | undefined
-    let releaseSessionRefresh: ((sessions: []) => void) | undefined
-    const sessionRefresh = new Promise<[]>((resolve) => {
-      releaseSessionRefresh = resolve
-    })
-    const status = vi
-      .fn()
-      .mockResolvedValueOnce({
-        isGitRepository: true,
-        repositoryRoot: '/code/project',
-        files: [],
-        additions: 0,
-        deletions: 0
+  it.each([
+    { failed: false, label: 'success' },
+    { failed: true, label: 'failure' }
+  ])(
+    'settles file changes after $label even when the user switches sessions',
+    async ({ failed }) => {
+      let onAgentEvent: ((payload: unknown) => void) | undefined
+      let releaseSessionRefresh: ((sessions: []) => void) | undefined
+      const sessionRefresh = new Promise<[]>((resolve) => {
+        releaseSessionRefresh = resolve
       })
-      .mockResolvedValueOnce({
-        isGitRepository: true,
-        repositoryRoot: '/code/project',
-        files: [
-          {
-            filePath: '/code/project/a.ts',
-            status: 'modified',
-            code: 'M',
-            indexStatus: ' ',
-            worktreeStatus: 'M'
-          }
-        ],
-        additions: 1,
-        deletions: 0
-      })
-    window.piSwitch = {
-      on: vi.fn((name: string, listener: (payload: unknown) => void) => {
-        if (name === 'agent-event') onAgentEvent = listener
-        return () => undefined
-      }),
-      agent: {
-        start: vi.fn().mockResolvedValue({ sessionId: 'session-1', cwd: '/code/project' }),
-        prompt: vi.fn().mockResolvedValue(null)
-      },
-      sessions: { list: vi.fn(() => sessionRefresh) },
-      git: {
-        status,
-        showFile: vi.fn().mockResolvedValue({ content: 'before' })
-      },
-      files: {
-        read: vi.fn().mockResolvedValue(textPreview('after'))
+      const status = vi
+        .fn()
+        .mockResolvedValueOnce({
+          isGitRepository: true,
+          repositoryRoot: '/code/project',
+          files: [],
+          additions: 0,
+          deletions: 0
+        })
+        .mockResolvedValueOnce({
+          isGitRepository: true,
+          repositoryRoot: '/code/project',
+          files: [
+            {
+              filePath: '/code/project/a.ts',
+              status: 'modified',
+              code: 'M',
+              indexStatus: ' ',
+              worktreeStatus: 'M'
+            }
+          ],
+          additions: 1,
+          deletions: 0
+        })
+      window.piSwitch = {
+        on: vi.fn((name: string, listener: (payload: unknown) => void) => {
+          if (name === 'agent-event') onAgentEvent = listener
+          return () => undefined
+        }),
+        agent: {
+          start: vi.fn().mockResolvedValue({ sessionId: 'session-1', cwd: '/code/project' }),
+          prompt: vi.fn().mockResolvedValue(null)
+        },
+        sessions: { list: vi.fn(() => sessionRefresh) },
+        git: {
+          status,
+          showFile: vi.fn().mockResolvedValue({ content: 'before' })
+        },
+        files: {
+          read: vi.fn().mockResolvedValue(textPreview('after'))
+        }
+      } as unknown as PiSwitchAPI
+
+      const agent = useAgentStore()
+      const changes = useConversationChangesStore()
+      agent.setupListeners()
+      await agent.send('session-1', '/code/project', 'hello', 'default')
+      await agent.load(null)
+
+      if (failed) {
+        onAgentEvent?.({ sessionId: 'session-1', event: { type: 'prompt_error' } })
       }
-    } as unknown as PiSwitchAPI
+      onAgentEvent?.({ sessionId: 'session-1', event: { type: 'prompt_done' } })
+      await vi.waitFor(() => expect(changes.stepsFor('session-1')).toHaveLength(1))
+      releaseSessionRefresh?.([])
 
-    const agent = useAgentStore()
-    const changes = useConversationChangesStore()
-    agent.setupListeners()
-    await agent.send('session-1', '/code/project', 'hello', 'default')
-    await agent.load(null)
-
-    onAgentEvent?.({ sessionId: 'session-1', event: { type: 'prompt_done' } })
-    await vi.waitFor(() => expect(changes.stepsFor('session-1')).toHaveLength(1))
-    releaseSessionRefresh?.([])
-
-    expect(changes.stepsFor('session-1')[0]?.files[0]?.after).toBe('after')
-  })
+      expect(changes.stepsFor('session-1')[0]?.files[0]?.after).toBe('after')
+      expect(changes.stepsFor('session-1')[0]?.failed).toBe(failed)
+    }
+  )
 
   it('keeps queued messages out of history until they are dispatched', async () => {
     let onAgentEvent: ((payload: unknown) => void) | undefined
@@ -380,6 +390,106 @@ describe('agent store new-session handshake', () => {
       'first queued',
       'second queued'
     ])
+  })
+
+  it('edits queued messages locally without dispatching them', async () => {
+    const prompt = vi.fn().mockResolvedValue(null)
+    window.piSwitch = {
+      sessions: { get: vi.fn().mockResolvedValue(sessionDetail('off')) },
+      agent: {
+        prompt,
+        state: vi.fn().mockResolvedValue({ isStreaming: true, isPromptRunning: true }),
+        running: vi.fn().mockResolvedValue([])
+      }
+    } as unknown as PiSwitchAPI
+
+    const agent = useAgentStore()
+    await agent.load('session-1')
+    await agent.send('session-1', '/code/project', 'original', 'default')
+    const queueId = agent.pendingQueue[0]?.id
+
+    expect(agent.editQueued(queueId ?? '', '  updated  ')).toBe(true)
+    expect(agent.pendingQueue[0]).toMatchObject({
+      id: queueId,
+      cwd: '/code/project',
+      message: 'updated',
+      images: [],
+      preset: 'default',
+      thinkingLevel: 'off'
+    })
+    expect(prompt).not.toHaveBeenCalled()
+  })
+
+  it('keeps the latest edit when the queue is released while editing', async () => {
+    let onAgentEvent: ((payload: unknown) => void) | undefined
+    let onAgentRunning: ((payload: unknown) => void) | undefined
+    const prompt = vi.fn().mockResolvedValue(null)
+    const running = vi.fn().mockResolvedValueOnce(['session-1']).mockResolvedValue([])
+    const state = vi
+      .fn()
+      .mockResolvedValueOnce({ isStreaming: true, isPromptRunning: true })
+      .mockResolvedValue({ isStreaming: false, isPromptRunning: false })
+    window.piSwitch = {
+      on: vi.fn((name: string, listener: (payload: unknown) => void) => {
+        if (name === 'agent-event') onAgentEvent = listener
+        if (name === 'agent-running') onAgentRunning = listener
+        return () => undefined
+      }),
+      sessions: { get: vi.fn().mockResolvedValue(sessionDetail('off')) },
+      agent: {
+        start: vi.fn().mockResolvedValue({ sessionId: 'session-1', cwd: '/code/project' }),
+        prompt,
+        state,
+        running
+      }
+    } as unknown as PiSwitchAPI
+
+    const agent = useAgentStore()
+    agent.setupListeners()
+    await agent.load('session-1')
+    await agent.send('session-1', '/code/project', 'original', 'default')
+    const queueId = agent.pendingQueue[0]?.id
+
+    agent.beginQueuedEdit(queueId ?? '')
+    agent.updateQueued(queueId ?? '', 'latest')
+    onAgentEvent?.({ sessionId: 'session-1', event: { type: 'prompt_done' } })
+    await vi.waitFor(() => expect(agent.pendingQueue[0]?.message).toBe('latest'))
+    expect(prompt).not.toHaveBeenCalled()
+
+    onAgentRunning?.({ ids: [] })
+    await agent.reconcile('session-1')
+    expect(agent.editQueued(queueId ?? '', 'latest')).toBe(true)
+    await vi.waitFor(() =>
+      expect(prompt).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        message: 'latest'
+      })
+    )
+  })
+
+  it('rejects empty text-only edits but allows empty image-only edits', async () => {
+    const prompt = vi.fn().mockResolvedValue(null)
+    window.piSwitch = {
+      sessions: { get: vi.fn().mockResolvedValue(sessionDetail('off')) },
+      agent: {
+        prompt,
+        state: vi.fn().mockResolvedValue({ isStreaming: true, isPromptRunning: true }),
+        running: vi.fn().mockResolvedValue([])
+      }
+    } as unknown as PiSwitchAPI
+
+    const agent = useAgentStore()
+    await agent.load('session-1')
+    await agent.send('session-1', '/code/project', 'original', 'default')
+    await agent.send('session-1', '/code/project', '', 'default', [
+      { type: 'image', data: 'TQ==', mimeType: 'image/png' }
+    ])
+    const [textItem, imageItem] = agent.pendingQueue
+
+    expect(agent.editQueued(textItem?.id ?? '', '   ')).toBe(false)
+    expect(textItem?.message).toBe('original')
+    expect(agent.editQueued(imageItem?.id ?? '', '   ')).toBe(true)
+    expect(imageItem?.message).toBe('')
   })
 
   it('binds prompts queued during new-session startup to the created session', async () => {

@@ -133,6 +133,20 @@ export const gitShowFileSchema = z.object({
   filePath: workspacePathSchema
 })
 
+export const gitFileMutationSchema = z.object({
+  cwd: cwdSchema,
+  filePaths: z.array(workspacePathSchema).min(1).max(256)
+})
+
+export const gitCommitSchema = z.object({
+  cwd: cwdSchema,
+  message: z
+    .string()
+    .min(1)
+    .max(2000)
+    .refine((value) => value.trim().length > 0, 'commit message is required')
+})
+
 export const worktreeListSchema = z.object({
   cwd: cwdSchema
 })

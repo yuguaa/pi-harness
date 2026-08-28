@@ -9,23 +9,31 @@ import { pathToFileURL } from 'node:url'
 import { DEFAULT_WINDOW } from '@shared/constants/index'
 import { getIsDev } from '../services/app-paths'
 import { log } from '../services/logger'
-import { isAllowedRendererNavigation } from './navigation-policy'
+import { installRendererNavigationGuard } from './navigation-policy'
 
-function resolvePreload(): string {
+export function resolvePreload(entry = 'index'): string {
   const dir = path.join(import.meta.dirname, '../preload')
-  for (const name of ['index.js', 'index.cjs', 'index.mjs']) {
+  for (const name of [`${entry}.js`, `${entry}.cjs`, `${entry}.mjs`]) {
     const p = path.join(dir, name)
     if (fs.existsSync(p)) return p
   }
   return path.join(dir, 'index.mjs')
 }
 
+export function resolveRendererUrl(): { entry: string; url: string; development: boolean } {
+  const entry = path.join(import.meta.dirname, '../renderer/index.html')
+  const developmentUrl =
+    getIsDev() && process.env['ELECTRON_RENDERER_URL'] ? process.env['ELECTRON_RENDERER_URL'] : null
+  return {
+    entry,
+    url: developmentUrl ?? pathToFileURL(entry).href,
+    development: Boolean(developmentUrl)
+  }
+}
+
 export function createMainWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
-  const rendererEntry = path.join(import.meta.dirname, '../renderer/index.html')
-  const developmentRendererUrl =
-    getIsDev() && process.env['ELECTRON_RENDERER_URL'] ? process.env['ELECTRON_RENDERER_URL'] : null
-  const rendererUrl = developmentRendererUrl ?? pathToFileURL(rendererEntry).href
+  const renderer = resolveRendererUrl()
 
   const win = new BrowserWindow({
     width: DEFAULT_WINDOW.width,
@@ -62,22 +70,17 @@ export function createMainWindow(): BrowserWindow {
   // create a browser window or hand a URL to the system browser.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
-  win.webContents.on('will-navigate', (event, url) => {
-    if (!isAllowedRendererNavigation(url, rendererUrl)) {
-      event.preventDefault()
-      log.app.warn('blocked navigation outside the desktop application')
-    }
-  })
+  installRendererNavigationGuard(win.webContents, renderer.url, 'main window')
 
   win.webContents.on('preload-error', (_event, preloadPath, error) => {
     log.app.error('preload failed', { preloadPath, error: String(error) })
   })
 
-  if (developmentRendererUrl) {
-    void win.loadURL(developmentRendererUrl)
+  if (renderer.development) {
+    void win.loadURL(renderer.url)
     log.app.info('loaded development renderer')
   } else {
-    void win.loadFile(rendererEntry)
+    void win.loadFile(renderer.entry)
   }
 
   return win

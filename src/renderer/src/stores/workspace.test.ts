@@ -104,6 +104,30 @@ describe('workspace file edit buffers', () => {
     workspace.discardFileEditBuffer('/code/app.ts')
     expect(workspace.fileEditBuffers['/code/app.ts']).toBeUndefined()
   })
+
+  it('opens file previews in the inspector without replacing the active chat tab', () => {
+    const workspace = useWorkspaceStore()
+    const sessions = useSessionStore()
+    workspace.addProjectRoot('/code/app')
+    workspace.ensureChatTab('session-a', 'Session A')
+    sessions.selectSession('session-a')
+
+    workspace.showInspectorFile('/code/app/src/main.ts')
+
+    expect(workspace.activeTabId).toBe('chat:session-a')
+    expect(workspace.inspectorTab).toBe('files')
+    expect(workspace.inspectorPreview).toBe('file')
+    expect(workspace.inspectorFilePath).toBe('/code/app/src/main.ts')
+    expect(workspace.tabs.map((tab) => tab.kind)).toEqual(['chat'])
+
+    workspace.showInspectorDiff('/code/app/src/main.ts')
+
+    expect(workspace.activeTabId).toBe('chat:session-a')
+    expect(workspace.inspectorTab).toBe('git')
+    expect(workspace.inspectorPreview).toBe('diff')
+    expect(workspace.inspectorDiffPath).toBe('/code/app/src/main.ts')
+    expect(workspace.inspectorFilePath).toBeNull()
+  })
 })
 
 describe('workspace projects', () => {

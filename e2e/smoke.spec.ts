@@ -1,6 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { test, expect } from './fixtures'
 import type { Page } from '@playwright/test'
 
@@ -191,7 +192,9 @@ test.describe('Pi-Harness smoke', () => {
     await expect(
       projectTree.locator('[data-project-key]').filter({ hasText: 'fixtures' })
     ).toHaveCount(1)
-    const composer = page.locator('main textarea')
+    const composer = page
+      .getByTestId('workspace-composer-editor')
+      .locator('[contenteditable="true"]')
     await expect(composer).toBeVisible()
     await expect(page.getByTestId('workspace-mascot')).toHaveCount(0)
     await composer.focus()
@@ -228,6 +231,21 @@ test.describe('Pi-Harness smoke', () => {
       .toBe(true)
 
     const chatScroller = page.getByTestId('chat-scroller')
+    const chatContent = page.getByTestId('chat-content')
+    const composerContent = page.getByTestId('composer-content')
+    await expect
+      .poll(async () => {
+        const [chatBox, composerBox] = await Promise.all([
+          chatContent.boundingBox(),
+          composerContent.boundingBox()
+        ])
+        if (!chatBox || !composerBox) return Number.POSITIVE_INFINITY
+        const chatCenter = chatBox.x + chatBox.width / 2
+        const composerCenter = composerBox.x + composerBox.width / 2
+        return Math.abs(chatCenter - composerCenter)
+      })
+      .toBeLessThanOrEqual(1)
+
     await chatScroller.evaluate((element) => {
       const filler = document.createElement('div')
       filler.dataset.scrollTestFiller = ''
@@ -264,33 +282,91 @@ test.describe('Pi-Harness smoke', () => {
 
     const code = page.getByTestId('file-code-view')
     await expect(code).toBeVisible()
-    await expect(code.locator('.cm-content')).toContainText('const answer = 42')
-    await expect(code.locator('.cm-gutterElement')).not.toHaveCount(0)
+    await expect(page.getByTestId('workspace-inspector-main')).toBeVisible()
+    await expect(page.getByTestId('workspace-inspector-preview')).toBeVisible()
+    await expect(
+      page.getByTestId('workspace-inspector').getByTestId('file-code-view')
+    ).toBeVisible()
+    await expect(page.getByTestId('chat-scroller')).toBeVisible()
+    await expect(code.locator('.view-lines')).toContainText('const answer = 42')
+    await expect(code.locator('.margin-view-overlays .line-numbers')).not.toHaveCount(0)
     await expect(page.getByText(/15 行|15 lines/)).toBeVisible()
 
-    await page.locator('main aside').getByRole('button', { name: 'README.md', exact: true }).click()
-    const tabs = page.getByTestId('workspace-tabs')
-    await tabs
-      .getByRole('button', { name: 'code-preview.html', exact: true })
-      .click({ button: 'right' })
-
-    const menu = page.getByTestId('tab-context-menu')
-    await expect(menu).toBeVisible()
-    await expect(menu.getByRole('menuitem', { name: '关闭', exact: true })).toBeVisible()
-    await expect(menu.getByRole('menuitem', { name: '关闭其他', exact: true })).toBeVisible()
-    await expect(menu.getByRole('menuitem', { name: '关闭右侧标签页', exact: true })).toBeVisible()
-    await expect(menu.getByRole('menuitem', { name: '关闭左侧标签页', exact: true })).toBeVisible()
-    await expect(menu.getByRole('menuitem', { name: '全部关闭', exact: true })).toBeVisible()
-
-    await menu.getByRole('menuitem', { name: '关闭其他', exact: true }).click()
-    await expect(tabs.getByRole('button')).toHaveCount(1)
-    await expect(tabs.getByRole('button', { name: 'code-preview.html', exact: true })).toBeVisible()
-    await expect(code.locator('.cm-content')).toContainText('const answer = 42')
+    const inspector = page.getByTestId('workspace-inspector')
+    await inspector.getByRole('button', { name: 'code-preview.html', exact: true }).click()
+    await inspector.getByRole('button', { name: 'README.md', exact: true }).click()
+    await expect(code.locator('.view-lines')).toContainText('Mock fixtures')
+    await expect(page.getByTestId('chat-scroller')).toBeVisible()
     expect(pageErrors).toEqual([])
     expect(consoleErrors).toEqual([])
   })
 
-  test('switches the office mascot style from Settings', async ({ page }) => {
+  test('stages and commits changes from the Git panel', async ({ page }) => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-harness-git-e2e-'))
+    const filePath = path.join(tempRoot, 'README.md')
+    try {
+      execFileSync('git', ['-C', tempRoot, 'init', '-q'])
+      execFileSync('git', ['-C', tempRoot, 'config', 'user.name', 'Pi Harness E2E'])
+      execFileSync('git', ['-C', tempRoot, 'config', 'user.email', 'pi-harness-e2e@example.com'])
+      fs.writeFileSync(filePath, 'before\n')
+      execFileSync('git', ['-C', tempRoot, 'add', '--', 'README.md'])
+      execFileSync('git', ['-C', tempRoot, 'commit', '-q', '-m', 'initial'])
+      fs.writeFileSync(filePath, 'after\n')
+
+      await page.evaluate(async (root) => {
+        await window.piSwitch.workspace.allowRoot(root)
+        localStorage.setItem(
+          'pi-harness.workspace.v1',
+          JSON.stringify({ projectKey: null, pickedCwd: root, tabs: [], activeTabId: null })
+        )
+      }, tempRoot)
+      await page.reload()
+      await expect(page.getByText('Pi-Harness').first()).toBeVisible({ timeout: 30_000 })
+
+      const inspector = page.getByTestId('workspace-inspector')
+      await inspector.getByRole('button', { name: /^Git$/ }).click()
+      await expect(inspector.getByTestId('git-change-list')).toBeVisible()
+      const fileRow = inspector.getByTestId('git-change-file').first()
+      await expect(fileRow).toContainText('README.md')
+      await fileRow.getByRole('button').first().click()
+      await expect(inspector.getByTestId('workspace-inspector-preview')).toBeVisible()
+      const diffEditors = inspector.getByTestId('git-diff-editor').locator('.monaco-editor')
+      await expect
+        .poll(() =>
+          diffEditors.evaluateAll((editors) => {
+            const positions = editors.map((editor) =>
+              Math.round(editor.getBoundingClientRect().left)
+            )
+            return new Set(positions).size
+          })
+        )
+        .toBeGreaterThanOrEqual(2)
+
+      const stageAction = inspector.locator('[data-testid="git-file-action"][data-action="stage"]')
+      await expect(stageAction).toHaveCount(1)
+      await expect(stageAction).toContainText(/暂存|Stage/)
+      await stageAction.click()
+
+      await expect(inspector.getByTestId('git-section-staged')).toContainText(
+        /已暂存更改|Staged Changes/
+      )
+      await expect(
+        inspector.locator('[data-testid="git-file-action"][data-action="unstage"]')
+      ).toHaveCount(1)
+      await inspector.getByTestId('git-commit-message').fill('update readme')
+      await inspector.getByTestId('git-commit').click()
+      await expect(page.getByText(/提交已创建|Commit created/)).toBeVisible()
+      expect(
+        execFileSync('git', ['-C', tempRoot, 'log', '-1', '--pretty=%s'], {
+          encoding: 'utf8'
+        }).trim()
+      ).toBe('update readme')
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('switches the office mascot style from Settings', async ({ page, electronApp }) => {
     const fixtureRoot = path.resolve(import.meta.dirname, '../fixtures')
     await page.evaluate(async (root) => {
       await window.piSwitch.workspace.allowRoot(root)
@@ -354,11 +430,15 @@ test.describe('Pi-Harness smoke', () => {
 
     await page.locator('a[href="#/workspace"]').click()
     await expect(page.getByTestId('page-mascot-background')).toHaveAttribute('data-style', 'office')
-    await expect(page.getByTestId('workspace-mascot')).toBeVisible()
-    await expect(page.getByTestId('workspace-mascot')).toHaveAttribute('data-style', 'office')
-    await expect(page.getByTestId('workspace-mascot')).toHaveAttribute('data-state', 'idle')
-    await expect(page.getByTestId('pet-status-bubble')).toContainText(/待机|Idle/)
-    await expect(page.getByTestId('workspace-mascot').locator('.pet-renderer')).toHaveClass(
+    await expect(page.getByTestId('workspace-mascot')).toHaveCount(0)
+    await expect.poll(() => electronApp.windows().length).toBe(2)
+    const petPage = electronApp.windows().find((window) => window.url().includes('window=pet'))
+    expect(petPage).toBeDefined()
+    await expect(petPage!.getByTestId('workspace-mascot')).toBeVisible()
+    await expect(petPage!.getByTestId('workspace-mascot')).toHaveAttribute('data-style', 'office')
+    await expect(petPage!.getByTestId('workspace-mascot')).toHaveAttribute('data-state', 'idle')
+    await expect(petPage!.getByTestId('pet-status-bubble')).toContainText(/待机|Idle/)
+    await expect(petPage!.getByTestId('workspace-mascot').locator('.pet-renderer')).toHaveClass(
       /pet-motion-off/
     )
   })
@@ -386,8 +466,8 @@ test.describe('Pi-Harness smoke', () => {
       await expect(page.getByRole('button', { name: '.env', exact: true })).toBeVisible()
       await page.getByRole('button', { name: 'editable.ts', exact: true }).click()
 
-      const editor = page.getByTestId('file-code-view').locator('.cm-content')
-      await expect(editor).toHaveAttribute('contenteditable', 'true')
+      const editor = page.getByTestId('file-code-view').locator('.view-lines')
+      await expect(editor).toBeVisible()
       await editor.click()
       await page.keyboard.press('ControlOrMeta+A')
       await page.keyboard.insertText('export const value = 2\n')
@@ -476,7 +556,7 @@ test.describe('Pi-Harness smoke', () => {
       )
 
       await page.getByRole('button', { name: 'uploaded.txt', exact: true }).click()
-      const code = page.getByTestId('file-code-view').locator('.cm-content')
+      const code = page.getByTestId('file-code-view').locator('.view-lines')
       await expect(code).toContainText('uploaded version 1')
 
       fs.writeFileSync(path.join(fixtureRoot, 'uploaded.txt'), 'uploaded version 2')

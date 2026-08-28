@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import WorkspaceSidebar from '@renderer/components/workspace/WorkspaceSidebar.vue'
 import WorkspaceTabs from '@renderer/components/workspace/WorkspaceTabs.vue'
 import ChatWindow from '@renderer/components/chat/ChatWindow.vue'
-import FileViewer from '@renderer/components/files/FileViewer.vue'
 import WorkspaceInspector from '@renderer/components/workspace/WorkspaceInspector.vue'
 import EmptyState from '@renderer/components/ui/EmptyState.vue'
 import { FolderOpen } from '@lucide/vue'
@@ -23,8 +22,6 @@ const workspaceSidebar = ref<InstanceType<typeof WorkspaceSidebar> | null>(null)
 const chatWindow = ref<InstanceType<typeof ChatWindow> | null>(null)
 const workspaceTabs = ref<InstanceType<typeof WorkspaceTabs> | null>(null)
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
-
-const activeKind = computed(() => workspace.activeTab?.kind ?? 'chat')
 
 async function focusComposer() {
   await nextTick()
@@ -158,8 +155,7 @@ watch(
         </EmptyState>
       </div>
       <div v-else class="min-h-0 flex-1 overflow-hidden">
-        <ChatWindow v-if="activeKind === 'chat'" ref="chatWindow" />
-        <FileViewer v-else-if="activeKind === 'file'" />
+        <ChatWindow ref="chatWindow" />
       </div>
     </section>
     <WorkspaceInspector />

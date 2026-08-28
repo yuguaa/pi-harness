@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import MessageView from './MessageView.vue'
 import ChatComposer from './ChatComposer.vue'
-import MascotView from './MascotView.vue'
 import EmptyState from '@renderer/components/ui/EmptyState.vue'
 import { ArrowDown, ArrowUp, Check, Copy, Gauge, History, MessageSquare } from '@lucide/vue'
 import { useAgentStore } from '@renderer/stores/agent'
@@ -16,10 +15,9 @@ import type { ToolPreset } from '@shared/workspace/tool-presets'
 import type { AgentImageAttachment } from '@shared/types/workspace'
 import { callApi, getApi } from '@renderer/composables/useApi'
 import { useCompletionSound } from '@renderer/composables/useCompletionSound'
-import { normalizeMascotStyle } from '@shared/constants/mascot'
-import { usePetStore } from '@renderer/stores/pet'
 import { useConversationChangesStore } from '@renderer/stores/conversation-changes'
 import ConversationChangesBar from './ConversationChangesBar.vue'
+import { buildChatFlow } from '@renderer/utils/chat-flow'
 
 const { locale } = useI18n()
 const agent = useAgentStore()
@@ -27,7 +25,6 @@ const sessions = useSessionStore()
 const workspace = useWorkspaceStore()
 const models = useModelsStore()
 const settings = useSettingsStore()
-const pet = usePetStore()
 const changes = useConversationChangesStore()
 const scroller = ref<HTMLElement | null>(null)
 const scrollContent = ref<HTMLElement | null>(null)
@@ -38,8 +35,6 @@ const hasScrollOverflow = ref(false)
 const atScrollTop = ref(true)
 const atScrollBottom = ref(true)
 const completionSound = useCompletionSound()
-const mascotStyle = computed(() => normalizeMascotStyle(settings.settings?.mascotStyle))
-const mascotActive = computed(() => !['idle', 'review', 'sleeping'].includes(pet.state))
 let stickToBottom = true
 let scrollResizeObserver: ResizeObserver | null = null
 
@@ -67,6 +62,10 @@ const displayMessages = computed(() => {
 })
 
 const changeSteps = computed(() => (sessions.currentId ? changes.stepsFor(sessions.currentId) : []))
+
+const chatFlow = computed(() =>
+  buildChatFlow(displayMessages.value, agent.entryIds, changeSteps.value)
+)
 
 function previewChange(filePath: string): void {
   workspace.showInspectorDiff(filePath)
@@ -361,50 +360,46 @@ function duration(value: number): string {
       <div
         ref="scroller"
         data-testid="chat-scroller"
-        class="h-full min-h-0 overflow-y-auto px-4 py-3 min-[1080px]:pr-[132px]"
+        class="h-full min-h-0 overflow-y-auto px-4 py-3"
         @scroll.passive="onScrollerScroll"
       >
-        <div ref="scrollContent">
+        <div ref="scrollContent" data-testid="chat-content" class="mx-auto w-full max-w-[72ch]">
           <EmptyState
             v-if="!displayMessages.length"
             :title="$t('workspace.emptyChat')"
             :description="$t('workspace.emptyChatHint')"
             :icon="MessageSquare"
           />
-          <MessageView
-            v-for="(message, index) in displayMessages"
-            :key="index"
-            :message="message"
-            :entry-id="agent.entryIds[index]"
-            :streaming="
-              Boolean(agent.streaming.streamingMessage) && index === displayMessages.length - 1
-            "
-          />
-          <p v-if="agent.error" class="mt-2 text-[12px] text-[var(--danger)]">
+          <template v-for="item in chatFlow.flow" :key="item.key">
+            <MessageView
+              :message="item.message"
+              :entry-id="item.entryId"
+              :show-meta="item.showMeta"
+              :streaming="Boolean(agent.streaming.streamingMessage) && item.isLast"
+            />
+            <!-- 文件变更横幅：跟随对应回合结束位置 -->
+            <ConversationChangesBar
+              v-for="step in item.steps"
+              :key="step.stepId"
+              :step="step"
+              @preview="previewChange"
+            />
+          </template>
+          <p v-if="agent.error" class="mx-auto mt-2 max-w-[72ch] text-[12px] text-[var(--danger)]">
             {{ agent.error }}
           </p>
           <ConversationChangesBar
-            v-for="step in changeSteps"
+            v-for="step in chatFlow.orphanSteps"
             :key="step.stepId"
             :step="step"
             @preview="previewChange"
           />
         </div>
       </div>
-      <MascotView
-        :style="mascotStyle"
-        :state="pet.state"
-        :current-tool="pet.currentTool"
-        :active="mascotActive"
-        :enabled="Boolean(settings.settings?.mascotUnlocked && settings.settings?.petEnabled)"
-        :animated="settings.settings?.petAnimations ?? true"
-        :show-status="settings.settings?.petStatusText ?? true"
-        class="hidden min-[1080px]:block"
-      />
       <div
         v-if="hasScrollOverflow"
         data-testid="chat-scroll-controls"
-        class="absolute bottom-3 right-4 z-20 flex flex-col gap-1 min-[1080px]:right-[120px]"
+        class="absolute bottom-3 right-4 z-20 flex flex-col gap-1"
       >
         <button
           v-if="!atScrollTop"
